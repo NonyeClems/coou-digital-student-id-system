@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { UserProfile, UserRole } from './types';
 import { auth, db } from './lib/firebase';
 import {
@@ -36,6 +36,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  // While signup() is actively creating the account, onAuthStateChanged fires
+  // with a stale firebaseUser snapshot (displayName not yet propagated from
+  // updateProfile()). Skip loadProfile's own profile-creation during that
+  // window so it can't race signup()'s authoritative write and clobber the
+  // real name with the "Anonymous User" fallback.
+  const signingUpRef = useRef(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -47,6 +53,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           photoURL: firebaseUser.photoURL,
         };
         setUser(u);
+        if (signingUpRef.current) {
+          return;
+        }
         await loadProfile(u);
       } else {
         setUser(null);
@@ -62,17 +71,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const profileRef = doc(db, 'profiles', currentUser.uid);
       const profileDoc = await getDoc(profileRef);
+      const isAdminEmail = INITIAL_ADMINS.includes(currentUser.email || '');
 
       if (profileDoc.exists()) {
-        setProfile(profileDoc.data() as UserProfile);
+        const existingProfile = profileDoc.data() as UserProfile;
+        // Self-heal: if this email is on the admin allow-list but the stored
+        // profile predates that (or was created before promotion), upgrade it.
+        if (isAdminEmail && existingProfile.role !== 'admin') {
+          const promotedProfile: UserProfile = { ...existingProfile, role: 'admin' };
+          await setDoc(profileRef, promotedProfile);
+          setProfile(promotedProfile);
+        } else {
+          setProfile(existingProfile);
+        }
       } else {
-        const role: UserRole = INITIAL_ADMINS.includes(currentUser.email || '') ? 'admin' : 'student';
+        const role: UserRole = isAdminEmail ? 'admin' : 'student';
         const newProfile: UserProfile = {
           uid: currentUser.uid,
           email: currentUser.email || '',
           displayName: currentUser.displayName || 'Anonymous User',
-          photoURL: currentUser.photoURL || undefined,
           role: role,
+          // Firestore rejects `undefined` field values, so only include
+          // photoURL when one actually exists rather than setting it to undefined.
+          ...(currentUser.photoURL ? { photoURL: currentUser.photoURL } : {}),
         };
         await setDoc(profileRef, newProfile);
         setProfile(newProfile);
@@ -97,10 +118,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       uid: userCredential.user.uid,
       email: email,
       displayName: name,
-      photoURL: undefined,
       role: role,
     };
-    
+
     await setDoc(doc(db, 'profiles', userCredential.user.uid), newProfile);
   };
 

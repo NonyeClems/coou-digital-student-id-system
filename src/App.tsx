@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -7,7 +7,7 @@ import { Scanner } from './components/Scanner';
 import { Navbar } from './components/Navbar';
 import { VerificationPortal } from './VerificationPortal';
 import { motion, AnimatePresence } from 'motion/react';
-import { IdCard, QrCode, LogIn } from 'lucide-react';
+import { IdCard, QrCode, LogIn, Eye, EyeOff } from 'lucide-react';
 import { UNIVERSITY_NAME, APP_NAME } from './constants';
 
 function AppContent() {
@@ -18,7 +18,23 @@ function AppContent() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login');
+  const [showPassword, setShowPassword] = useState(false);
   const location = useLocation();
+
+  // Reset the auth form whenever there's no signed-in user (fresh load or
+  // just logged out), so the next person on this browser doesn't see a
+  // previous session's leftover email/name/messages.
+  useEffect(() => {
+    if (!user) {
+      setEmail('');
+      setPassword('');
+      setName('');
+      setLoginError('');
+      setSuccessMessage('');
+      setMode('login');
+      setShowPassword(false);
+    }
+  }, [user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,14 +152,25 @@ function AppContent() {
             {mode !== 'reset' && (
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Password</label>
-                <input
-                  type="password"
-                  placeholder="Enter your password..."
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-university-green focus:border-transparent text-sm"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Enter your password..."
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-3 pr-11 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-university-green focus:border-transparent text-sm"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-university-green transition-colors cursor-pointer"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             )}
 

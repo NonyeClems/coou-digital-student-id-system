@@ -23,7 +23,7 @@ import {
 import { cn, calculateLevel, compressImage, generateStudentId } from '../lib/utils';
 import { DEPARTMENTS } from '../constants';
 import { db } from '../lib/firebase';
-import { doc, setDoc, getDocs, collection, query, where, deleteDoc, limit } from 'firebase/firestore';
+import { doc, setDoc, getDoc, getDocs, collection, query, where, deleteDoc, limit } from 'firebase/firestore';
 
 export function StudentPortal() {
   const idCardRef = useRef<HTMLDivElement>(null);
@@ -33,7 +33,10 @@ export function StudentPortal() {
   const [offlineMode, setOfflineMode] = useState(false);
   const [isEnrolling, setIsEnrolling] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  
+  const [isSubmittingEnrollment, setIsSubmittingEnrollment] = useState(false);
+  const [enrollError, setEnrollError] = useState('');
+  const [justEnrolled, setJustEnrolled] = useState(false);
+
   const [enrollData, setEnrollData] = useState({
     name: user?.displayName || '',
     department: DEPARTMENTS[0],
@@ -64,18 +67,17 @@ export function StudentPortal() {
           setOfflineMode(false);
           localStorage.setItem(`id_card_${user.uid}`, JSON.stringify(studentData));
         } else {
-          // Fallback to local storage cache if offline/not found
-          const cached = localStorage.getItem(`id_card_${user.uid}`);
-          if (cached) {
-            setStudent(JSON.parse(cached));
-            setOfflineMode(true);
-          } else {
-            setStudent(null);
-          }
+          // No record in the database (never enrolled, or a previous record was
+          // deleted). Clear any stale local cache so the student can freshly
+          // re-enroll instead of being stuck looking at an old cached record.
+          localStorage.removeItem(`id_card_${user.uid}`);
+          setStudent(null);
+          setOfflineMode(false);
         }
       } catch (error) {
         console.error("Error fetching student profile:", error);
-        // Try cache on error
+        // Only fall back to cache here (a real connectivity/permission error),
+        // not when the database legitimately returned no record.
         const cached = localStorage.getItem(`id_card_${user.uid}`);
         if (cached) {
           setStudent(JSON.parse(cached));
@@ -132,9 +134,10 @@ export function StudentPortal() {
         setStudent(null);
         setIsEnrolling(true);
         setIsConfirmingDelete(false);
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error deleting student registration:", error);
-        alert("Failed to delete record from database.");
+        setIsConfirmingDelete(false);
+        alert(`Failed to delete record from database. ${error?.message ? `(${error.message})` : 'Please try again.'}`);
       }
     } else {
       setIsConfirmingDelete(true);
@@ -144,13 +147,26 @@ export function StudentPortal() {
 
   const handleEnrollment = async (e: React.FormEvent) => {
     e.preventDefault();
+    setEnrollError('');
+
     if (!user?.email || !enrollData.name || !enrollData.passportURL || !enrollData.registrationNumber) {
-       alert("Please complete all compulsory fields including Registration Number and upload a verified photograph.");
+       setEnrollError("Please complete all compulsory fields including Registration Number and upload a verified photograph.");
        return;
     }
+
     const studentId = enrollData.registrationNumber;
+    setIsSubmittingEnrollment(true);
     try {
       const docId = studentId;
+
+      // Prevent silently overwriting another student's record that already
+      // uses this registration number.
+      const existingDoc = await getDoc(doc(db, 'students', docId));
+      if (existingDoc.exists() && (existingDoc.data() as Student).email !== user.email) {
+        setEnrollError("This Registration Number is already registered to another account. Please verify and try again.");
+        return;
+      }
+
       const newStudent: Student = {
         name: enrollData.name,
         email: user.email,
@@ -169,15 +185,19 @@ export function StudentPortal() {
         updatedAt: Date.now(),
         status: 'active'
       };
-      
+
       await setDoc(doc(db, 'students', docId), newStudent);
-      
+
       localStorage.setItem(`id_card_${user.uid}`, JSON.stringify(newStudent));
       setStudent(newStudent);
       setIsEnrolling(false);
+      setJustEnrolled(true);
+      setTimeout(() => setJustEnrolled(false), 6000);
     } catch (error) {
       console.error("Error self-enrolling", error);
-      alert("Failed to enroll. Contact administration.");
+      setEnrollError("Failed to submit enrollment. Please check your connection and try again, or contact administration.");
+    } finally {
+      setIsSubmittingEnrollment(false);
     }
   };
 
@@ -201,7 +221,14 @@ export function StudentPortal() {
           </div>
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Identity Enrollment</h2>
           <p className="text-slate-500 font-medium mt-1 mb-8">Complete your biometric registration to generate your Digital Student ID.</p>
-          
+
+          {enrollError && (
+            <div className="mb-6 bg-red-50 text-red-600 p-4 rounded-xl text-sm font-bold border border-red-100 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              {enrollError}
+            </div>
+          )}
+
           <form onSubmit={handleEnrollment} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
@@ -315,13 +342,17 @@ export function StudentPortal() {
               </div>
             </div>
             <div className="pt-6 flex gap-3">
-              <button type="button" onClick={() => setIsEnrolling(false)}
-                className="flex-1 px-8 py-4 rounded-xl border border-slate-200 font-bold text-slate-500 hover:bg-slate-50 transition-all uppercase text-xs tracking-widest">
+              <button type="button" onClick={() => { setIsEnrolling(false); setEnrollError(''); }}
+                disabled={isSubmittingEnrollment}
+                className="flex-1 px-8 py-4 rounded-xl border border-slate-200 font-bold text-slate-500 hover:bg-slate-50 transition-all uppercase text-xs tracking-widest disabled:opacity-50">
                 Cancel
               </button>
-              <button type="submit"
-                className="flex-1 px-8 py-4 rounded-xl bg-university-green text-white font-bold hover:bg-university-green/90 transition-all shadow-lg shadow-emerald-100 uppercase text-xs tracking-widest">
-                Submit Enrollment
+              <button type="submit" disabled={isSubmittingEnrollment}
+                className="flex-1 px-8 py-4 rounded-xl bg-university-green text-white font-bold hover:bg-university-green/90 transition-all shadow-lg shadow-emerald-100 uppercase text-xs tracking-widest flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed">
+                {isSubmittingEnrollment && (
+                  <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                )}
+                {isSubmittingEnrollment ? "Submitting..." : "Submit Enrollment"}
               </button>
             </div>
           </form>
@@ -365,6 +396,19 @@ export function StudentPortal() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
+      <AnimatePresence>
+        {justEnrolled && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="bg-emerald-50 text-emerald-700 px-5 py-4 rounded-2xl border border-emerald-100 flex items-center gap-3 font-bold text-sm shadow-sm"
+          >
+            <CheckCircle2 className="w-5 h-5 shrink-0" />
+            Enrollment submitted successfully! Your Digital Student ID has been generated below.
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tight">Identity Portal</h2>

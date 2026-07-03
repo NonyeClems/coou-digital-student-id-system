@@ -119,9 +119,9 @@ export function AdminDashboard() {
         bloodGroup: 'O+',
         religion: 'Christianity'
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving student:", error);
-      alert("Failed to save student record to database.");
+      alert(`Failed to save student record to database. ${error?.message ? `(${error.message})` : 'Please try again.'}`);
     }
   };
 
@@ -131,17 +131,17 @@ export function AdminDashboard() {
     if (deletingId === docId) {
       try {
         await deleteDoc(doc(db, 'students', docId));
-        const updatedStudents = students.filter(s => s.docId !== docId);
-        setStudents(updatedStudents);
+        setStudents(prev => prev.filter(s => s.docId !== docId));
         setDeletingId(null);
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error deleting student:", error);
-        alert("Failed to delete student from database.");
+        setDeletingId(null);
+        alert(`Failed to delete student from database. ${error?.message ? `(${error.message})` : 'Please try again.'}`);
       }
     } else {
       setDeletingId(docId);
-      // Auto-reset confirmation after 3 seconds
-      setTimeout(() => setDeletingId(null), 3000);
+      // Auto-reset confirmation after 4 seconds
+      setTimeout(() => setDeletingId(current => current === docId ? null : current), 4000);
     }
   };
 
