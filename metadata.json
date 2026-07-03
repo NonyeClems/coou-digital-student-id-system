@@ -1,0 +1,13 @@
+{
+  "name": "COOU Digital Student ID System",
+  "description": "Official Student Identification Number System for Chukwuemeka Odumegwu Ojukwu University, featuring digital ID cards and real-time verification.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "Firebase Authentication",
+    "Firestore Database",
+    "QR Code Generation",
+    "QR Code Scanning"
+  ]
+}

@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --color-university-green: #006837;
+  --color-university-yellow: #FFD700;
+  --color-university-gold: #DAA520;
+} 
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900;
+  }
+}
