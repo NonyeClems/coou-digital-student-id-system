@@ -110,18 +110,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signup = async (email: string, password: string, name: string) => {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    await updateProfile(userCredential.user, { displayName: name });
-    
-    const role: UserRole = INITIAL_ADMINS.includes(email) ? 'admin' : 'student';
-    const newProfile: UserProfile = {
-      uid: userCredential.user.uid,
-      email: email,
-      displayName: name,
-      role: role,
-    };
+    signingUpRef.current = true;
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(userCredential.user, { displayName: name });
 
-    await setDoc(doc(db, 'profiles', userCredential.user.uid), newProfile);
+      const role: UserRole = INITIAL_ADMINS.includes(email) ? 'admin' : 'student';
+      const newProfile: UserProfile = {
+        uid: userCredential.user.uid,
+        email: email,
+        displayName: name,
+        role: role,
+      };
+
+      await setDoc(doc(db, 'profiles', userCredential.user.uid), newProfile);
+      setProfile(newProfile);
+      setUser({ uid: userCredential.user.uid, email, displayName: name, photoURL: null });
+    } finally {
+      signingUpRef.current = false;
+      setLoading(false);
+    }
   };
 
   const logout = async () => {
