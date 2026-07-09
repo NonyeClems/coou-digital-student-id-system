@@ -6,9 +6,8 @@ import { StudentPortal } from './components/StudentPortal';
 import { Scanner } from './components/Scanner';
 import { Navbar } from './components/Navbar';
 import { VerificationPortal } from './VerificationPortal';
-import { motion, AnimatePresence } from 'motion/react';
 import { IdCard, QrCode, LogIn, Eye, EyeOff } from 'lucide-react';
-import { UNIVERSITY_NAME, APP_NAME } from './constants';
+import { UNIVERSITY_NAME } from './constants';
 
 function AppContent() {
   const { user, profile, loading, login, signup, resetPassword } = useAuth();
@@ -80,24 +79,16 @@ function AppContent() {
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-          className="w-8 h-8 border-4 border-university-green border-t-transparent rounded-full"
-        />
+        <div className="w-8 h-8 border-4 border-university-green border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
-  // Allow public verification routes even if not logged in
-  if (!user && !location.pathname.startsWith('/verify')) {
+  // Allow public verification routes (QR landing page and scanner) even if not logged in
+  if (!user && !location.pathname.startsWith('/verify') && location.pathname !== '/scanner') {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-2xl shadow-xl max-w-lg w-full text-center space-y-6 border-t-4 border-university-green"
-        >
+        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-lg w-full text-center space-y-6 border-t-4 border-university-green">
           <div className="w-16 h-16 bg-university-green/10 rounded-full flex items-center justify-center mx-auto">
             <IdCard className="w-8 h-8 text-university-green" />
           </div>
@@ -164,7 +155,7 @@ function AppContent() {
                   <button
                     type="button"
                     onClick={() => setShowPassword((prev) => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-university-green transition-colors cursor-pointer"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-university-green cursor-pointer"
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                     tabIndex={-1}
                   >
@@ -176,7 +167,7 @@ function AppContent() {
 
             <button
               type="submit"
-              className="w-full flex items-center justify-center gap-2 bg-university-green hover:bg-university-green/90 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-emerald-100 mt-2 cursor-pointer"
+              className="w-full flex items-center justify-center gap-2 bg-university-green hover:bg-university-green/90 text-white font-bold py-4 px-6 rounded-xl shadow-lg shadow-emerald-100 mt-2 cursor-pointer"
             >
               <LogIn className="w-5 h-5" />
               {mode === 'login' && 'Login to COOU Account'}
@@ -188,21 +179,21 @@ function AppContent() {
           <div className="flex flex-col gap-2 pt-2 text-xs font-bold text-slate-500">
             {mode === 'login' && (
               <>
-                <button onClick={() => { setMode('signup'); setLoginError(''); setSuccessMessage(''); }} className="hover:text-university-green transition-colors cursor-pointer">
+                <button onClick={() => { setMode('signup'); setLoginError(''); setSuccessMessage(''); }} className="hover:text-university-green cursor-pointer">
                   Don't have an account? Sign Up
                 </button>
-                <button onClick={() => { setMode('reset'); setLoginError(''); setSuccessMessage(''); }} className="hover:text-university-green transition-colors cursor-pointer">
+                <button onClick={() => { setMode('reset'); setLoginError(''); setSuccessMessage(''); }} className="hover:text-university-green cursor-pointer">
                   Forgot Password?
                 </button>
               </>
             )}
             {mode === 'signup' && (
-              <button onClick={() => { setMode('login'); setLoginError(''); setSuccessMessage(''); }} className="hover:text-university-green transition-colors cursor-pointer">
+              <button onClick={() => { setMode('login'); setLoginError(''); setSuccessMessage(''); }} className="hover:text-university-green cursor-pointer">
                 Already have an account? Login
               </button>
             )}
             {mode === 'reset' && (
-              <button onClick={() => { setMode('login'); setLoginError(''); setSuccessMessage(''); }} className="hover:text-university-green transition-colors cursor-pointer">
+              <button onClick={() => { setMode('login'); setLoginError(''); setSuccessMessage(''); }} className="hover:text-university-green cursor-pointer">
                 Back to Login
               </button>
             )}
@@ -211,7 +202,7 @@ function AppContent() {
           <div className="pt-6 border-t border-slate-100">
             <NavigateToScanner />
           </div>
-        </motion.div>
+        </div>
       </div>
     );
   }
@@ -229,7 +220,7 @@ function AppContent() {
               <StudentPortal />
             )
           } />
-          <Route path="/scanner" element={<Scanner onClose={() => {}} />} />
+          <Route path="/scanner" element={<ScannerPage />} />
           <Route path="/verify/:studentId" element={<VerificationPortal />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
@@ -243,6 +234,11 @@ function AppContent() {
       </footer>
     </div>
   );
+}
+
+function ScannerPage() {
+  const navigate = useNavigate();
+  return <Scanner onClose={() => navigate('/')} />;
 }
 
 function NavigateToScanner() {

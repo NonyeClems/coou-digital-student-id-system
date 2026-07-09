@@ -22,6 +22,27 @@ export function generateStudentId(department: string, year?: number) {
   return `${y}${deptCode}${randomDigits}`;
 }
 
+/**
+ * Converts a registration number into a value that is safe to use as a
+ * Firestore document ID and as a URL path segment. Firestore document IDs
+ * cannot contain forward slashes (common in registration numbers such as
+ * "2021/CS/1234"), so they are replaced with hyphens.
+ */
+export function toDocId(registrationNumber: string) {
+  return registrationNumber.trim().replace(/\//g, '-');
+}
+
+/**
+ * Base URL used inside QR codes so that scanned cards always point at the
+ * deployed site. Falls back to the current origin when VITE_APP_BASE_URL is
+ * not configured (fine in production, but cards generated on localhost would
+ * otherwise encode a localhost URL that no external phone can reach).
+ */
+export function getVerificationBaseUrl() {
+  const configured = import.meta.env.VITE_APP_BASE_URL as string | undefined;
+  return (configured || window.location.origin).replace(/\/+$/, '');
+}
+
 export function calculateLevel(yearStr: string | number) {
   const y = parseInt(yearStr as string);
   if (isNaN(y)) return "100 Level";

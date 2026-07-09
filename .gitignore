@@ -1,1 +1,6 @@
 node_modules
+dist
+
+# Local environment files contain real Firebase credentials - never commit them.
+.env.local
+.env.*.local

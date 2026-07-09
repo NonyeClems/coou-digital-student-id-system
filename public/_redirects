@@ -1,0 +1,3 @@
+# Netlify SPA fallback: every route (e.g. /verify/<id> opened from a scanned
+# QR code) must serve index.html so React Router can handle it client-side.
+/*    /index.html   200

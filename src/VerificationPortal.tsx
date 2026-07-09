@@ -2,14 +2,16 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Student } from './types';
 import { motion } from 'motion/react';
-import { 
-  CheckCircle2, 
-  XCircle, 
-  Building, 
-  Calendar, 
-  Smartphone, 
+import {
+  CheckCircle2,
+  XCircle,
+  Building,
+  Calendar,
+  Smartphone,
   ArrowLeft,
   ShieldCheck,
+  ShieldAlert,
+  GraduationCap,
   MapPin
 } from 'lucide-react';
 import { UNIVERSITY_NAME } from './constants';
@@ -22,18 +24,22 @@ export function VerificationPortal() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!studentId) return;
+    if (!studentId) {
+      setLoading(false);
+      return;
+    }
 
     const performLookup = async () => {
+      const lookupId = studentId.trim();
       try {
-        const docRef = doc(db, 'students', studentId);
+        const docRef = doc(db, 'students', lookupId);
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
           setStudent({ ...docSnap.data() as Student, docId: docSnap.id });
         } else {
           // Fallback query by ID / Matric number field
-          const q = query(collection(db, 'students'), where('id', '==', studentId), limit(1));
+          const q = query(collection(db, 'students'), where('id', '==', lookupId), limit(1));
           const querySnapshot = await getDocs(q);
           if (!querySnapshot.empty) {
             const studentDoc = querySnapshot.docs[0];
@@ -50,12 +56,7 @@ export function VerificationPortal() {
       }
     };
 
-    // Keep the 1.5s delay for a premium registry loading simulation feel!
-    const timer = setTimeout(() => {
-      performLookup();
-    }, 1500);
-
-    return () => clearTimeout(timer);
+    performLookup();
   }, [studentId]);
 
   if (loading) {
@@ -102,6 +103,28 @@ export function VerificationPortal() {
     );
   }
 
+  const status = student.status || 'active';
+  const statusUi = {
+    active: {
+      banner: 'bg-university-green',
+      title: 'Authentic Record',
+      subtitle: 'COOU Verification Services System',
+      icon: <ShieldCheck className="w-10 h-10 text-white" />,
+    },
+    suspended: {
+      banner: 'bg-amber-600',
+      title: 'Record Suspended',
+      subtitle: 'This student ID is currently not valid',
+      icon: <ShieldAlert className="w-10 h-10 text-white" />,
+    },
+    graduated: {
+      banner: 'bg-slate-700',
+      title: 'Alumni Record',
+      subtitle: 'This student has graduated from the university',
+      icon: <GraduationCap className="w-10 h-10 text-white" />,
+    },
+  }[status];
+
   return (
     <div className="min-h-screen bg-slate-100/50 flex flex-col items-center py-12 px-4">
       <motion.div
@@ -110,18 +133,13 @@ export function VerificationPortal() {
         className="w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200"
       >
         {/* Verification Header */}
-        <div className="bg-university-green p-8 text-center relative overflow-hidden">
+        <div className={`${statusUi.banner} p-8 text-center relative overflow-hidden`}>
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,242,0,0.1),transparent)]" />
-          <motion.div
-            initial={{ scale: 0.5, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: 0.2 }}
-            className="w-20 h-20 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30"
-          >
-            <ShieldCheck className="w-10 h-10 text-white" />
-          </motion.div>
-          <h1 className="text-white text-xl font-black uppercase tracking-[0.2em] mb-1">Authentic Record</h1>
-          <p className="text-white/70 text-[10px] font-bold uppercase tracking-widest">COOU Verification Services System</p>
+          <div className="w-20 h-20 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center mx-auto mb-4 border border-white/30">
+            {statusUi.icon}
+          </div>
+          <h1 className="text-white text-xl font-black uppercase tracking-[0.2em] mb-1">{statusUi.title}</h1>
+          <p className="text-white/70 text-[10px] font-bold uppercase tracking-widest">{statusUi.subtitle}</p>
         </div>
 
         {/* Record Content */}
@@ -136,8 +154,12 @@ export function VerificationPortal() {
                   className="w-32 h-32 md:w-40 md:h-40 object-cover rounded-2xl"
                 />
               </div>
-              <div className="absolute -bottom-3 -right-3 bg-emerald-500 p-2 rounded-full border-4 border-white text-white shadow-lg">
-                <CheckCircle2 className="w-5 h-5" />
+              <div className={`absolute -bottom-3 -right-3 p-2 rounded-full border-4 border-white text-white shadow-lg ${
+                status === 'active' ? 'bg-emerald-500' : status === 'suspended' ? 'bg-amber-500' : 'bg-slate-500'
+              }`}>
+                {status === 'active' ? <CheckCircle2 className="w-5 h-5" /> :
+                 status === 'suspended' ? <ShieldAlert className="w-5 h-5" /> :
+                 <GraduationCap className="w-5 h-5" />}
               </div>
             </div>
             
@@ -156,10 +178,15 @@ export function VerificationPortal() {
           {/* Academic Details */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="space-y-6">
-              <DetailItem 
-                icon={<Building className="w-5 h-5" />} 
-                label="Primary Department" 
-                value={student.department} 
+              <DetailItem
+                icon={<ShieldCheck className="w-5 h-5" />}
+                label="Verification Status"
+                value={status === 'active' ? 'Active / Enrolled' : status === 'suspended' ? 'Suspended / Withdrawn' : 'Graduated / Alumni'}
+              />
+              <DetailItem
+                icon={<Building className="w-5 h-5" />}
+                label="Primary Department"
+                value={student.department}
               />
               <DetailItem 
                 icon={<Calendar className="w-5 h-5" />} 

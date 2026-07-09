@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Student } from '../types';
-import { generateStudentId, cn, calculateLevel, compressImage } from '../lib/utils';
+import { cn, calculateLevel, compressImage, toDocId } from '../lib/utils';
 import { DEPARTMENTS } from '../constants';
 import { useAuth } from '../AuthContext';
 import { 
@@ -67,10 +67,10 @@ export function AdminDashboard() {
     e.preventDefault();
     try {
       let currentStudents = [...students];
-      const studentId = formData.registrationNumber;
+      const studentId = formData.registrationNumber.trim();
 
       if (editingStudent) {
-        const docId = editingStudent.docId || studentId;
+        const docId = editingStudent.docId || toDocId(studentId);
         const updatedData: Student = {
           ...editingStudent,
           ...formData,
@@ -86,7 +86,7 @@ export function AdminDashboard() {
           currentStudents[index] = updatedData;
         }
       } else {
-        const docId = studentId;
+        const docId = toDocId(studentId);
         const newStudent: Student = {
           ...formData,
           level: calculateLevel(formData.admissionYear),
@@ -297,7 +297,7 @@ export function AdminDashboard() {
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => handleDelete(student.docId)}
+                          onClick={() => handleDelete(student.docId || toDocId(student.id))}
                           className={cn(
                             "p-2 transition-all rounded-lg",
                             deletingId === student.docId 

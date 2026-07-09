@@ -20,7 +20,7 @@ import {
   LogOut,
   Trash2
 } from 'lucide-react';
-import { cn, calculateLevel, compressImage, generateStudentId } from '../lib/utils';
+import { cn, calculateLevel, compressImage, toDocId, getVerificationBaseUrl } from '../lib/utils';
 import { DEPARTMENTS } from '../constants';
 import { db } from '../lib/firebase';
 import { doc, setDoc, getDoc, getDocs, collection, query, where, deleteDoc, limit } from 'firebase/firestore';
@@ -154,10 +154,10 @@ export function StudentPortal() {
        return;
     }
 
-    const studentId = enrollData.registrationNumber;
+    const studentId = enrollData.registrationNumber.trim();
     setIsSubmittingEnrollment(true);
     try {
-      const docId = studentId;
+      const docId = toDocId(studentId);
 
       // Prevent silently overwriting another student's record that already
       // uses this registration number.
@@ -539,10 +539,10 @@ export function StudentPortal() {
 
               <div className="bg-white p-3 border-2 border-university-green/10 rounded-3xl shadow-inner relative group">
                 <div className="absolute inset-0 bg-university-yellow/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-3xl" />
-                <QRCodeSVG 
-                  value={`${window.location.origin}/verify/${student.docId}`} 
-                  size={110} 
-                  level="H" 
+                <QRCodeSVG
+                  value={`${getVerificationBaseUrl()}/verify/${encodeURIComponent(student.docId || toDocId(student.id))}`}
+                  size={110}
+                  level="H"
                   aria-label="Student ID verification QR code"
                 />
               </div>

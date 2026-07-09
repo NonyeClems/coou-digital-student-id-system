@@ -25,19 +25,28 @@ export function Scanner({ onClose }: ScannerProps) {
 
     const onScanSuccess = async (decodedText: string) => {
       // Handle both raw IDs and full verification URLs
-      let studentDocId = decodedText;
-      if (decodedText.includes('/verify/')) {
-        const parts = decodedText.split('/verify/');
+      let studentDocId = decodedText.trim();
+      if (studentDocId.includes('/verify/')) {
+        const parts = studentDocId.split('/verify/');
         studentDocId = parts[parts.length - 1];
+      }
+      try {
+        // IDs inside verification URLs are URL-encoded by the ID card generator
+        studentDocId = decodeURIComponent(studentDocId);
+      } catch {
+        // Not URL-encoded — use the raw value
+      }
+
+      if (!studentDocId) {
+        scanner.clear().catch(() => {});
+        setError("Invalid QR Code. No student identifier found.");
+        return;
       }
 
       try {
         scanner.clear();
         setVerifying(true);
         setError(null);
-        
-        // Simulate network delay for verification feel
-        await new Promise(r => setTimeout(r, 800));
 
         const docRef = doc(db, 'students', studentDocId);
         const docSnap = await getDoc(docRef);
