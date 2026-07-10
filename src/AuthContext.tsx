@@ -30,7 +30,12 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const INITIAL_ADMINS = ['nonyeasuzu3@gmail.com'];
+// Emails granted the 'admin' role on signup/login. Must stay in sync with
+// isAdminEmail() in firestore.rules, which is what actually enforces that
+// only these accounts can hold an elevated role.
+// admin@coou.edu.ng is the local-development administrator seeded into the
+// Firebase emulators by `npm run seed:admin` (password: Admin123!).
+const INITIAL_ADMINS = ['nonyeasuzu3@gmail.com', 'admin@coou.edu.ng'];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);

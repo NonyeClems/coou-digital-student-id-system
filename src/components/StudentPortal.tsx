@@ -149,12 +149,11 @@ export function StudentPortal() {
     e.preventDefault();
     setEnrollError('');
 
-    if (!user?.email || !enrollData.name || !enrollData.passportURL || !enrollData.registrationNumber) {
+    const studentId = enrollData.registrationNumber.trim();
+    if (!user?.email || !enrollData.name.trim() || !enrollData.passportURL || !studentId) {
        setEnrollError("Please complete all compulsory fields including Registration Number and upload a verified photograph.");
        return;
     }
-
-    const studentId = enrollData.registrationNumber.trim();
     setIsSubmittingEnrollment(true);
     try {
       const docId = toDocId(studentId);

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
-import { collection, getDocs, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
 
 export function AdminDashboard() {
   const { logout } = useAuth();
@@ -26,6 +26,7 @@ export function AdminDashboard() {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -65,9 +66,15 @@ export function AdminDashboard() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    const studentId = formData.registrationNumber.trim();
+    if (!studentId) {
+      alert('Please enter a valid Registration Number.');
+      return;
+    }
+    setIsSaving(true);
     try {
       let currentStudents = [...students];
-      const studentId = formData.registrationNumber.trim();
 
       if (editingStudent) {
         const docId = editingStudent.docId || toDocId(studentId);
@@ -87,6 +94,15 @@ export function AdminDashboard() {
         }
       } else {
         const docId = toDocId(studentId);
+
+        // Creating a record with a registration number that is already in use
+        // must not silently overwrite the existing student.
+        const existingDoc = await getDoc(doc(db, 'students', docId));
+        if (existingDoc.exists()) {
+          alert('A student with this Registration Number already exists. Edit the existing record instead.');
+          return;
+        }
+
         const newStudent: Student = {
           ...formData,
           level: calculateLevel(formData.admissionYear),
@@ -122,6 +138,8 @@ export function AdminDashboard() {
     } catch (error: any) {
       console.error("Error saving student:", error);
       alert(`Failed to save student record to database. ${error?.message ? `(${error.message})` : 'Please try again.'}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -520,10 +538,15 @@ export function AdminDashboard() {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 px-8 py-4 rounded-xl bg-university-green text-white font-bold hover:bg-university-green/90 transition-all shadow-lg shadow-emerald-100 uppercase text-xs tracking-widest flex items-center justify-center gap-2"
+                    disabled={isSaving}
+                    className="flex-1 px-8 py-4 rounded-xl bg-university-green text-white font-bold hover:bg-university-green/90 transition-all shadow-lg shadow-emerald-100 uppercase text-xs tracking-widest flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
                   >
-                    <span>{editingStudent ? 'Apply Updates' : 'Generate Student Number'}</span>
-                    <CheckCircle2 className="w-4 h-4 text-university-yellow" />
+                    {isSaving ? (
+                      <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 text-university-yellow" />
+                    )}
+                    <span>{isSaving ? 'Saving...' : editingStudent ? 'Apply Updates' : 'Generate Student Number'}</span>
                   </button>
                 </div>
               </form>

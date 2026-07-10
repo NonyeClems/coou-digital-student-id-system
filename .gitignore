@@ -2,5 +2,14 @@ node_modules
 dist
 
 # Local environment files contain real Firebase credentials - never commit them.
+# (.env.emulators is intentionally committed - it only contains offline demo values.)
 .env.local
 .env.*.local
+
+# Firebase Local Emulator Suite artifacts
+.emulator-data
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+emulator-debug.log
+firebase-export-*

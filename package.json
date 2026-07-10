@@ -1,13 +1,18 @@
 {
-  "name": "react-example",
+  "name": "coou-digital-student-id-system",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "start": "node scripts/dev-menu.mjs",
     "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev:emulators": "vite --mode emulators --port=3000 --host=0.0.0.0",
+    "emulators": "firebase emulators:start --project demo-coou-student-id",
+    "seed:admin": "node scripts/seed-admin.mjs",
+    "test:backend": "node scripts/test-backend.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "clean": "rm -rf dist",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
@@ -36,6 +41,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
+    "firebase-tools": "^15.23.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
