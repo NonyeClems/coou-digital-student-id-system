@@ -13,11 +13,13 @@ A web application for **Chukwuemeka Odumegwu Ojukwu University (COOU)** that iss
 5. [Environment Variables](#5-environment-variables)
 6. [Database Setup (Firebase)](#6-database-setup-firebase)
 7. [Running the Application](#7-running-the-application)
-8. [Administrator Credentials](#8-administrator-credentials)
-9. [QR Code Verification — How It Works](#9-qr-code-verification--how-it-works)
-10. [Deployment](#10-deployment)
-11. [Troubleshooting](#11-troubleshooting)
-12. [Assumptions, Limitations & External Services](#12-assumptions-limitations--external-services)
+8. [Local Development with the Firebase Emulator Suite](#8-local-development-with-the-firebase-emulator-suite)
+9. [Administrator Credentials](#9-administrator-credentials)
+10. [Backend Verification Suite](#10-backend-verification-suite)
+11. [QR Code Verification — How It Works](#11-qr-code-verification--how-it-works)
+12. [Deployment](#12-deployment)
+13. [Troubleshooting](#13-troubleshooting)
+14. [Assumptions, Limitations & External Services](#14-assumptions-limitations--external-services)
 
 ---
 
@@ -53,10 +55,16 @@ This is a **single-page application (SPA)** with a **serverless backend**. There
 | `src/components/AdminDashboard.tsx` | Admin CRUD over all student records |
 | `src/components/Scanner.tsx` | In-app camera QR scanner |
 | `src/VerificationPortal.tsx` | Public page a scanned QR resolves to (`/verify/:id`) |
-| `src/lib/firebase.ts` | Firebase initialization from environment variables |
+| `src/lib/firebase.ts` | Firebase initialization from environment variables (+ emulator wiring) |
 | `src/lib/utils.ts` | ID sanitization, level calculation, image compression, QR base URL |
 | `src/constants.ts` | Departments, department codes, university branding |
 | `src/types.ts` | `Student` and `UserProfile` data models |
+| `firestore.rules` | Firestore security rules (role-based access control) |
+| `firebase.json` | Firebase Emulator Suite configuration (ports, Emulator UI) |
+| `scripts/dev-menu.mjs` | Interactive terminal menu (`npm start`) with Start Over / Exit |
+| `scripts/seed-admin.mjs` | Seeds the local admin account into the emulators |
+| `scripts/verify-backend.mjs` | End-to-end backend verification suite (24 checks) |
+| `scripts/test-backend.mjs` | Runs the suite, managing emulator startup/cleanup |
 
 ### Data model (Firestore)
 
@@ -108,8 +116,11 @@ This is a **single-page application (SPA)** with a **serverless backend**. There
 - **Node.js 18+** (20 LTS recommended) — https://nodejs.org
 - **npm 9+** (bundled with Node) — `pnpm` also works (a `pnpm-lock.yaml` is present)
 - **Git**
-- A **Google account** to create a free Firebase project (Spark plan is sufficient)
+- **Java 11+** (JRE or JDK) — required only for the local Firestore emulator (`npm start` / `npm run emulators` / `npm run test:backend`) — https://adoptium.net
+- A **Google account** to create a free Firebase project (Spark plan is sufficient) — *not needed for emulator-only local development*
 - A modern browser (Chrome, Edge, Firefox, Safari)
+
+> `firebase-tools` (the Firebase CLI used to run the emulators) is a project devDependency — `npm install` provides it; no global install required.
 
 ---
 
@@ -156,6 +167,8 @@ All variables live in `.env.local` (never commit this file) and are read **at bu
 
 ## 6. Database Setup (Firebase)
 
+> **You can skip this whole section for local development** — `npm start` → option **[1]** runs the app against the offline [Firebase Emulator Suite](#8-local-development-with-the-firebase-emulator-suite) with no Firebase project, credentials, or internet required. A real Firebase project is only needed to deploy or to run against live data.
+
 Firestore is schemaless, so there are **no migration scripts** — collections and documents are created automatically the first time the app writes them. One-time setup:
 
 ### 6.1 Create the project
@@ -177,29 +190,18 @@ Firestore is schemaless, so there are **no migration scripts** — collections a
 
 ### 6.4 Security rules
 
-**Firestore Database → Rules** — publish:
+The rules live in [firestore.rules](firestore.rules) at the repo root (they are also what the local emulator enforces). Publish them to production either by pasting the file's contents into **Firestore Database → Rules**, or from the CLI:
 
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-
-    // Student records: publicly readable so scanned QR codes can be
-    // verified without an account. Writes require a signed-in user.
-    match /students/{studentId} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-
-    // User profiles: each user can only read/write their own profile.
-    match /profiles/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-  }
-}
+```bash
+npx firebase deploy --only firestore:rules --project <your-project-id>
 ```
 
-> Public read on `students` is a deliberate product decision — it is what lets any phone verify a scanned ID without logging in. If that is unacceptable, verification must be moved behind a Cloud Function; see [Limitations](#12-assumptions-limitations--external-services).
+What they enforce:
+
+- **`students`** — publicly readable (so any phone can verify a scanned QR code without an account). Admins/staff can create, update, and delete any record; a signed-in student can only write/delete the record bearing their own email.
+- **`profiles`** — each user can read/write only their own profile, and the `admin`/`staff` role can only be stored for emails on the admin allow-list (see [Administrator Credentials](#9-administrator-credentials)). This means a tampered client **cannot** self-promote to admin — the allow-list is enforced server-side.
+
+> Public read on `students` is a deliberate product decision — it is what lets any phone verify a scanned ID without logging in. If that is unacceptable, verification must be moved behind a Cloud Function; see [Limitations](#14-assumptions-limitations--external-services).
 
 ### 6.5 Indexes
 
@@ -209,50 +211,125 @@ Not required. All queries used by the app (`where email ==`, `where id ==`, `ord
 
 ## 7. Running the Application
 
-There is **no separate backend to start** — Firebase is the backend. All commands run from the project root.
+There is **no separate backend server process to write or start** — Firebase (or its local emulator) is the backend. All commands run from the project root.
+
+**The recommended entry point is the interactive development console:**
+
+```bash
+npm start
+```
+
+It presents a menu:
+
+```
+[1] Start app with LOCAL Firebase emulators (recommended for development)
+[2] Start app with LIVE Firebase (uses .env.local credentials)
+[3] Run backend verification suite (end-to-end checks against emulators)
+[4] Type-check the project
+[Q] Exit
+```
+
+While the app is running, the console stays interactive — the terminal is never cleared:
+
+- **`R` — Start Over**: shuts the dev server (and emulators) down, resets all state, and relaunches the same session automatically. No manual re-running, no clearing the terminal.
+- **`Q` — Exit**: gracefully terminates every child process (dev server, emulators) and quits.
+
+If the default app port 3000 is taken, launch with another one: `PORT=3001 npm start` (PowerShell: `$env:PORT='3001'; npm start`).
+
+### All npm scripts
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Development server at **http://localhost:3000** (hot reload, listens on all interfaces so you can open it from a phone on the same network) |
+| `npm start` | **Interactive dev console** (menu above, with Start Over / Exit) |
+| `npm run dev` | Dev server only, against **live Firebase** (`.env.local`), at http://localhost:3000 |
+| `npm run dev:emulators` | Dev server only, in **emulator mode** (expects emulators already running) |
+| `npm run emulators` | Firebase Local Emulator Suite only (Auth + Firestore + Emulator UI) |
+| `npm run seed:admin` | Creates the local admin account in the running emulators |
+| `npm run test:backend` | **Backend verification suite** — 24 end-to-end checks (starts/stops emulators automatically) |
 | `npm run lint` | Type-checks the entire project (`tsc --noEmit`) |
 | `npm run build` | Production build into `dist/` |
 | `npm run preview` | Serves the production build locally (for pre-deployment smoke tests) |
-| `npm run clean` | Deletes `dist/` (uses `rm -rf`; on Windows run it from Git Bash, or delete the folder manually) |
-
-There is currently **no automated test suite**; `npm run lint` (type-check) plus the manual smoke test below are the verification steps.
+| `npm run clean` | Deletes `dist/` (cross-platform) |
 
 ### First-run smoke test
 
-1. `npm run dev` → open http://localhost:3000 — the login page appears.
-2. **Sign Up** with any email/password → you land in the Student Portal.
+1. `npm start` → choose **[1]** — emulators boot, the admin account is seeded, the dev server starts. No Firebase project or credentials needed.
+2. Open http://localhost:3000 → **Sign Up** with any email/password → you land in the Student Portal.
 3. **Start Self-Enrollment** → fill the form, upload any photo → an ID card with a QR code is rendered.
 4. Open http://localhost:3000/scanner (or click *Verify* in the navbar) and scan the card's QR from another screen, or simply open `http://localhost:3000/verify/<REG-NUMBER>` — the verification page shows the student's record and status.
+5. Open http://localhost:4000/firestore — the record you just created is visible in the **Emulator UI**.
+6. Press **`R`** in the terminal to start over, or **`Q`** to exit.
 
 ---
 
-## 8. Administrator Credentials
+## 8. Local Development with the Firebase Emulator Suite
 
-Admin access is granted by an **email allow-list** in the source code — there is no separate admin signup flow.
+Development runs **fully offline** against the [Firebase Local Emulator Suite](https://firebase.google.com/docs/emulator-suite) — no production project is needed or touched.
 
-1. Open [src/AuthContext.tsx](src/AuthContext.tsx) and edit:
+### How it is wired
+
+- `npm start` → option **[1]** (or `npm run emulators` + `npm run dev:emulators` manually) starts:
+  - **Auth emulator** on port `9099`
+  - **Firestore emulator** on port `8181`
+  - **Emulator UI** on port `4000` — browse/edit Firestore documents and Auth users live
+- In emulator mode Vite loads [.env.emulators](.env.emulators), which sets `VITE_USE_FIREBASE_EMULATORS=true` and a **`demo-` project ID**. `src/lib/firebase.ts` sees the flag and calls `connectAuthEmulator` / `connectFirestoreEmulator`. Firebase treats `demo-*` projects as strictly offline, so **development data can never reach a real Firebase project** — even accidentally.
+- The emulators enforce the same [firestore.rules](firestore.rules) as production, so permission behavior is identical.
+- The emulators listen on all interfaces and the app derives the emulator host from the page URL, so opening the app **from a phone on the same network** works too.
+- Emulator data is in-memory: **Start Over** (`R`) or restarting the emulators resets the database to a clean slate (the admin account is re-seeded automatically).
+
+Ports are configured in [firebase.json](firebase.json); if you change them, update `src/lib/firebase.ts` and `scripts/emulator-utils.mjs` to match.
+
+> **Windows note:** firebase-tools occasionally fails to terminate the Java Firestore emulator on shutdown, which would leave port 8181 taken. The dev console and `npm run test:backend` detect and clean up such orphaned processes automatically.
+
+---
+
+## 9. Administrator Credentials
+
+### Local development (emulators)
+
+A ready-to-use administrator is seeded automatically when you start via `npm start` → **[1]** (or manually with `npm run seed:admin`):
+
+| | |
+|---|---|
+| **Email** | `admin@coou.edu.ng` |
+| **Password** | `Admin123!` |
+
+Log in with these credentials → you land on the **Admin Dashboard**.
+
+### Production
+
+Admin access is granted by an **email allow-list** — there is no separate admin signup flow. The list lives in **two places that must stay in sync**:
+
+1. [src/AuthContext.tsx](src/AuthContext.tsx) — assigns the role on signup/login:
 
    ```ts
-   const INITIAL_ADMINS = ['nonyeasuzu3@gmail.com'];
+   const INITIAL_ADMINS = ['nonyeasuzu3@gmail.com', 'admin@coou.edu.ng'];
    ```
 
-   Add the email address(es) that should have admin rights.
+2. [firestore.rules](firestore.rules) — `isAdminEmail()` **enforces** the same list server-side, so a modified client cannot self-promote.
 
-2. Rebuild/restart the app, then **sign up (or log in) with that exact email**. The account's profile is created — or automatically upgraded on next login if it already exists — with `role: 'admin'`.
+To add an administrator: add the email to both files, rebuild/redeploy the app, republish the rules ([section 6.4](#64-security-rules)), then **sign up (or log in) with that exact email**. The account's profile is created — or automatically upgraded on next login — with `role: 'admin'`, and the **Admin Dashboard** appears at `/`: full search, enroll, edit, suspend, and delete over all student records. Non-admin users see only their own student portal, and the security rules block them from writing other students' records or reading other profiles.
 
-3. Admins see the **Admin Dashboard** at `/` instead of the student portal: full search, enroll, edit, suspend, and delete over all student records.
-
-To grant `staff` (dashboard access without the admin badge), edit the user's document in the Firestore `profiles` collection and set `role: "staff"` manually.
-
-> Limitation: the allow-list is compiled into the client bundle and roles are enforced client-side plus by the Firestore rules above. For a production hardening step, enforce roles in Firestore rules (e.g. custom claims via the Admin SDK) rather than trusting the client.
+To grant `staff` (dashboard access without the admin badge), add the email to both allow-lists as above but set the user's `role` field to `"staff"` in the Firestore `profiles` collection.
 
 ---
 
-## 9. QR Code Verification — How It Works
+## 10. Backend Verification Suite
+
+`npm run test:backend` (or `npm start` → **[3]**) runs **24 automated end-to-end checks** against the emulator-backed Firestore — the exact reads/writes the app performs, plus adversarial cases:
+
+1. **Account registration** — Auth signup, profile document persistence.
+2. **Enrollment** — the student record is written with the full data-model structure and exact values, is immediately queryable, and duplicate registration numbers are detectable.
+3. **QR verification** — the QR payload round-trips to the right document ID; an **unauthenticated** client (a phone that scanned the code) resolves the record; Student A's QR yields only Student A; unknown IDs report "not found" without crashing.
+4. **Administrator** — admin credentials authenticate, the allow-listed email may hold the admin role, admin can enroll/update/list/delete any student.
+5. **Role-based access control** — unauthenticated writes are rejected; a student cannot overwrite or delete another student's record, cannot self-promote to admin, and cannot read another user's profile.
+6. **Deletion lifecycle** — deleted records immediately fail verification gracefully.
+
+The suite exits non-zero on any failure, so it can be used in CI. If the emulators are already running it reuses them; otherwise it starts and stops them automatically.
+
+---
+
+## 11. QR Code Verification — How It Works
 
 - Every enrolled student's ID card embeds a QR code (`qrcode.react`, error-correction level **H**) encoding:
 
@@ -268,13 +345,15 @@ To grant `staff` (dashboard access without the admin badge), edit the user's doc
 
 - **Error handling:** an unknown/invalid/deleted ID shows a "Verification Failed / record not found" page; suspended records are clearly flagged as **not valid**; network failures show a connection error with a retry option.
 
+- **Testing QR codes from a real phone during development:** the dev console (`npm start`) automatically points QR codes at this machine's LAN address (e.g. `http://192.168.x.x:3000`) when `VITE_APP_BASE_URL` is not set, and both the dev server and the emulators listen on all interfaces — so a phone on the same Wi-Fi can scan a card rendered on your desktop and load the verification page end-to-end.
+
 - **Deployment requirements for QR codes to keep working** (both covered by this repo / docs):
-  1. The host must rewrite all paths to `index.html` (see [Deployment](#10-deployment)) so `/verify/...` deep links don't 404.
+  1. The host must rewrite all paths to `index.html` (see [Deployment](#12-deployment)) so `/verify/...` deep links don't 404.
   2. Set `VITE_APP_BASE_URL` to the production URL before building, so cards always encode the live domain.
 
 ---
 
-## 10. Deployment
+## 12. Deployment
 
 The production build is a fully static site (`dist/`) — it can be hosted anywhere that serves static files **and supports SPA rewrites** (all routes → `index.html`).
 
@@ -298,11 +377,10 @@ The production build is a fully static site (`dist/`) — it can be hosted anywh
 ### Firebase Hosting
 
 ```bash
-npm install -g firebase-tools
-firebase login
-firebase init hosting   # public directory: dist, configure as SPA: Yes
+npx firebase login
+npx firebase init hosting   # public directory: dist, configure as SPA: Yes
 npm run build
-firebase deploy --only hosting
+npx firebase deploy --only hosting
 ```
 
 The "configure as SPA" answer writes the required rewrite into `firebase.json`.
@@ -317,29 +395,30 @@ location / {
 
 ---
 
-## 11. Troubleshooting
+## 13. Troubleshooting
 
 | Symptom | Cause & fix |
 |---|---|
-| Login/signup fails with `auth/invalid-api-key` or a blank page with console errors about Firebase | `.env.local` missing or has placeholder values. Fill in real values and **restart the dev server** (env vars are read at startup only). |
-| `auth/operation-not-allowed` on signup | Email/Password provider not enabled — see [6.2](#62-enable-authentication). |
+| Login/signup fails with `auth/invalid-api-key` or a blank page with console errors about Firebase | In live mode: `.env.local` missing or has placeholder values — fill in real values and **restart the dev server**. Or simply develop against the emulators (`npm start` → **[1]**), which needs no credentials. |
+| `auth/operation-not-allowed` on signup | Email/Password provider not enabled — see [6.2](#62-enable-authentication). (Not applicable in emulator mode.) |
 | `auth/unauthorized-domain` on the deployed site | Add the domain under Firebase Auth → Settings → Authorized domains. |
-| `Missing or insufficient permissions` (Firestore) | Security rules not published or too strict — publish the rules in [6.4](#64-security-rules). |
-| Scanned QR code opens a 404 | The host is not rewriting routes to `index.html` — see [Deployment](#10-deployment). |
-| Scanned QR opens `http://localhost:3000/...` | The card was generated from a build without `VITE_APP_BASE_URL`. Set it and rebuild; the card view re-renders the QR from live data, so no data fix is needed. |
+| `Missing or insufficient permissions` (Firestore) | Security rules not published or too strict — publish [firestore.rules](firestore.rules), see [6.4](#64-security-rules). Also occurs legitimately when a non-admin attempts an admin operation. |
+| Scanned QR code opens a 404 | The host is not rewriting routes to `index.html` — see [Deployment](#12-deployment). |
+| Scanned QR opens `http://localhost:3000/...` | The card was generated from a build without `VITE_APP_BASE_URL`. Set it and rebuild; the card view re-renders the QR from live data, so no data fix is needed. (The dev console auto-substitutes your LAN IP during development.) |
 | In-app scanner camera never starts | Browsers only expose the camera on **HTTPS or localhost**. Test on `localhost` or the deployed HTTPS site, and accept the camera permission prompt. |
 | "This Registration Number is already registered to another account" | Registration numbers are unique document IDs. Use the correct number, or have an admin delete/edit the conflicting record. |
 | `Failed to save student record ... document exceeds maximum size` | Firestore documents max out at ~1 MB and passport photos are stored inline as base64. Upload a smaller photo (the app already compresses to 400px wide, but extremely large originals can still fail). |
-| Port 3000 already in use | Stop the other process, or change the port in the `dev` script in `package.json`. |
-| `npm run clean` fails on Windows | The script uses `rm -rf`. Run it from Git Bash or delete `dist/` manually. |
-| Admin sees the student portal instead of the dashboard | The logged-in email is not in `INITIAL_ADMINS` (exact match, case-sensitive as typed). Add it, rebuild, log out and back in. |
+| Port 3000 already in use | The dev console detects this and tells you; launch with `PORT=3001 npm start` (PowerShell: `$env:PORT='3001'; npm start`) or stop the other process. |
+| Emulator fails to start: "port taken" (8181/9099) | Usually an orphaned emulator from a previous run — `npm start` and `npm run test:backend` clean these up automatically. If it persists, another app owns the port: change the ports in [firebase.json](firebase.json) (and the matching constants in `src/lib/firebase.ts` / `scripts/emulator-utils.mjs`). |
+| Firestore emulator fails to start mentioning Java | Install Java 11+ (https://adoptium.net) — the Firestore emulator runs on the JVM. |
+| Admin sees the student portal instead of the dashboard | The logged-in email is not in `INITIAL_ADMINS` (exact match, case-sensitive as typed). Add it to **both** `src/AuthContext.tsx` and `firestore.rules`, rebuild, log out and back in. |
 
 ---
 
-## 12. Assumptions, Limitations & External Services
+## 14. Assumptions, Limitations & External Services
 
 **External services (the only one):**
-- **Firebase** (Auth + Cloud Firestore). Free Spark plan suffices for moderate usage. No other APIs, servers, or databases are required. (The `GEMINI_API_KEY` reference in `vite.config.ts` is a leftover from the original template and is unused.)
+- **Firebase** (Auth + Cloud Firestore) — and only in production; local development runs entirely on the offline Emulator Suite. Free Spark plan suffices for moderate usage. No other APIs, servers, or databases are required.
 
 **Assumptions:**
 - Registration numbers are unique per student and are entered correctly at enrollment (they become the record's identity and the QR payload).
@@ -347,7 +426,7 @@ location / {
 
 **Known limitations:**
 - Passport photos are stored as base64 strings inside Firestore documents (~1 MB document cap) rather than in Cloud Storage.
-- Role enforcement relies on the client and basic Firestore rules; the admin allow-list ships in the client bundle. Harden with Firebase custom claims for a high-stakes deployment.
+- The admin allow-list is duplicated between `src/AuthContext.tsx` (role assignment) and `firestore.rules` (enforcement) and the two must be kept in sync. For a higher-assurance deployment, migrate to Firebase custom claims set via the Admin SDK.
 - Academic level is derived from admission year with hardcoded year thresholds in `src/lib/utils.ts` (`calculateLevel`) — update these each academic session.
 - Students can self-enroll with any registration number that is not already taken; there is no cross-check against an official registry import.
-- No automated tests yet; verification is type-checking plus the manual smoke test in [Section 7](#7-running-the-application).
+- Automated coverage is the backend verification suite ([Section 10](#10-backend-verification-suite)) plus type-checking; there are no UI/component tests yet.
