@@ -1,156 +1,79 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Student } from '../types';
-import { cn, calculateLevel, compressImage, toDocId } from '../lib/utils';
-import { DEPARTMENTS } from '../constants';
+import { cn, toDocId } from '../lib/utils';
 import { useAuth } from '../AuthContext';
-import { 
-  Search, 
-  UserPlus, 
-  Edit2, 
-  Trash2, 
+import {
+  Search,
+  UserPlus,
+  Edit2,
+  Trash2,
   AlertCircle,
   CheckCircle2,
   XCircle,
-  Camera,
-  LogOut
+  CloudUpload,
+  WifiOff,
+  LogOut,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db } from '../lib/firebase';
-import { collection, getDocs, getDoc, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import {
+  removeStudent,
+  subscribeToAllStudents,
+  StudentListItem,
+} from '../lib/students';
+import { StudentRegistrationForm } from './StudentRegistrationForm';
 
 export function AdminDashboard() {
   const { logout } = useAuth();
-  const [students, setStudents] = useState<Student[]>([]);
+  const online = useOnlineStatus();
+  const [students, setStudents] = useState<StudentListItem[]>([]);
+  const [fromCache, setFromCache] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [notice, setNotice] = useState<{ kind: 'synced' | 'queued'; text: string } | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Form state
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    registrationNumber: '',
-    department: DEPARTMENTS[0],
-    admissionYear: 2025,
-    level: calculateLevel(2025),
-    passportURL: '',
-    status: 'active' as Student['status'],
-    phone: '',
-    gender: 'Male',
-    dob: '',
-    bloodGroup: 'O+',
-    religion: 'Christianity'
-  });
-
+  // Live registry subscription: serves the persistent cache when offline and
+  // flags records whose local changes are still waiting to reach the server.
   useEffect(() => {
-    const fetchStudents = async () => {
-      try {
-        const q = query(collection(db, 'students'), orderBy('createdAt', 'desc'));
-        const querySnapshot = await getDocs(q);
-        const fetchedStudents: Student[] = [];
-        querySnapshot.forEach((doc) => {
-          fetchedStudents.push({ ...doc.data() as Student, docId: doc.id });
-        });
-        setStudents(fetchedStudents);
-      } catch (error) {
-        console.error("Error fetching students:", error);
-      } finally {
+    // Don't declare "no records" from an empty first cache snapshot while the
+    // server is still being consulted (see the same pattern in StudentPortal).
+    const settleTimer = setTimeout(() => setLoading(false), 4000);
+    const unsubscribe = subscribeToAllStudents(
+      (state) => {
+        setStudents(state.students);
+        setFromCache(state.fromCache);
+        if (state.students.length > 0 || !state.fromCache || !navigator.onLine) {
+          setLoading(false);
+        }
+      },
+      (error) => {
+        console.error('Error subscribing to students:', error);
         setLoading(false);
       }
+    );
+    return () => {
+      clearTimeout(settleTimer);
+      unsubscribe();
     };
-    fetchStudents();
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isSaving) return;
-    const studentId = formData.registrationNumber.trim();
-    if (!studentId) {
-      alert('Please enter a valid Registration Number.');
-      return;
-    }
-    setIsSaving(true);
-    try {
-      let currentStudents = [...students];
-
-      if (editingStudent) {
-        const docId = editingStudent.docId || toDocId(studentId);
-        const updatedData: Student = {
-          ...editingStudent,
-          ...formData,
-          id: studentId,
-          level: calculateLevel(formData.admissionYear),
-          updatedAt: Date.now()
-        };
-
-        await setDoc(doc(db, 'students', docId), updatedData);
-
-        const index = currentStudents.findIndex(s => s.docId === docId);
-        if (index !== -1) {
-          currentStudents[index] = updatedData;
-        }
-      } else {
-        const docId = toDocId(studentId);
-
-        // Creating a record with a registration number that is already in use
-        // must not silently overwrite the existing student.
-        const existingDoc = await getDoc(doc(db, 'students', docId));
-        if (existingDoc.exists()) {
-          alert('A student with this Registration Number already exists. Edit the existing record instead.');
-          return;
-        }
-
-        const newStudent: Student = {
-          ...formData,
-          level: calculateLevel(formData.admissionYear),
-          id: studentId,
-          docId: docId,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-
-        await setDoc(doc(db, 'students', docId), newStudent);
-        currentStudents.unshift(newStudent);
-      }
-      
-      setStudents(currentStudents);
-
-      setIsModalOpen(false);
-      setEditingStudent(null);
-      setFormData({
-        name: '',
-        email: '',
-        registrationNumber: '',
-        department: DEPARTMENTS[0],
-        admissionYear: 2025,
-        level: calculateLevel(2025),
-        passportURL: '',
-        status: 'active',
-        phone: '',
-        gender: 'Male',
-        dob: '',
-        bloodGroup: 'O+',
-        religion: 'Christianity'
-      });
-    } catch (error: any) {
-      console.error("Error saving student:", error);
-      alert(`Failed to save student record to database. ${error?.message ? `(${error.message})` : 'Please try again.'}`);
-    } finally {
-      setIsSaving(false);
-    }
+  const showNotice = (kind: 'synced' | 'queued', text: string) => {
+    setNotice({ kind, text });
+    setTimeout(() => setNotice(null), 6000);
   };
-
-  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDelete = async (docId: string) => {
     if (deletingId === docId) {
       try {
-        await deleteDoc(doc(db, 'students', docId));
-        setStudents(prev => prev.filter(s => s.docId !== docId));
+        const outcome = await removeStudent(docId);
         setDeletingId(null);
+        if (!outcome.synced) {
+          showNotice('queued', 'Record deleted on this device — the deletion will sync automatically.');
+        }
       } catch (error: any) {
         console.error("Error deleting student:", error);
         setDeletingId(null);
@@ -163,66 +86,112 @@ export function AdminDashboard() {
     }
   };
 
-  const openEdit = (student: Student) => {
-    setEditingStudent(student);
-    setFormData({
-      name: student.name,
-      email: student.email,
-      registrationNumber: student.id,
-      department: student.department,
-      admissionYear: student.admissionYear || 2025,
-      level: student.level,
-      passportURL: student.passportURL,
-      status: student.status,
-      phone: student.phone || '',
-      gender: student.gender || 'Male',
-      dob: student.dob || '',
-      bloodGroup: student.bloodGroup || 'O+',
-      religion: student.religion || 'Christianity'
-    });
+  const openCreate = () => {
+    setEditingStudent(null);
     setIsModalOpen(true);
   };
 
-  const filteredStudents = students.filter(s => 
-    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.email.toLowerCase().includes(searchTerm.toLowerCase())
+  const openEdit = (student: Student) => {
+    setEditingStudent(student);
+    setIsModalOpen(true);
+  };
+
+  const term = searchTerm.toLowerCase();
+  const filteredStudents = students.filter(s =>
+    s.name.toLowerCase().includes(term) ||
+    s.id.toLowerCase().includes(term) ||
+    s.email.toLowerCase().includes(term)
+  );
+
+  const statusBadge = (student: StudentListItem) => (
+    <span className={cn(
+      "inline-flex items-center gap-1.5 text-[10px] uppercase font-black px-2.5 py-1 rounded-full border shadow-xs",
+      student.status === 'active' ? "text-emerald-700 bg-emerald-50 border-emerald-100" :
+      student.status === 'suspended' ? "text-amber-700 bg-amber-50 border-amber-100" :
+      "text-slate-500 bg-slate-50 border-slate-100"
+    )}>
+      {student.status === 'active' ? <CheckCircle2 className="w-3.5 h-3.5" /> :
+       student.status === 'suspended' ? <AlertCircle className="w-3.5 h-3.5" /> :
+       <XCircle className="w-3.5 h-3.5" />}
+      {student.status}
+    </span>
+  );
+
+  const pendingBadge = (student: StudentListItem) =>
+    student.pendingSync ? (
+      <span className="inline-flex items-center gap-1 text-[9px] uppercase font-black px-2 py-0.5 rounded-full border text-sky-700 bg-sky-50 border-sky-100">
+        <CloudUpload className="w-3 h-3" />
+        Sync pending
+      </span>
+    ) : null;
+
+  const rowActions = (student: StudentListItem) => (
+    <div className="flex items-center justify-end gap-1">
+      <button
+        onClick={() => openEdit(student)}
+        className="p-2 text-slate-400 hover:text-university-green hover:bg-slate-50 transition-all rounded-lg"
+        title="Edit Record"
+      >
+        <Edit2 className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => handleDelete(student.docId || toDocId(student.id))}
+        className={cn(
+          "p-2 transition-all rounded-lg",
+          deletingId === student.docId
+            ? "text-white bg-red-500 hover:bg-red-600 font-bold px-3 text-xs"
+            : "text-slate-400 hover:text-red-500 hover:bg-red-50"
+        )}
+        title="Delete Record"
+      >
+        {deletingId === student.docId ? 'Confirm' : <Trash2 className="w-4 h-4" />}
+      </button>
+    </div>
   );
 
   return (
     <div className="space-y-6">
+      <AnimatePresence>
+        {notice && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className={cn(
+              'px-5 py-4 rounded-2xl border flex items-center gap-3 font-bold text-sm shadow-sm',
+              notice.kind === 'synced'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                : 'bg-sky-50 text-sky-700 border-sky-100'
+            )}
+          >
+            {notice.kind === 'synced'
+              ? <CheckCircle2 className="w-5 h-5 shrink-0" />
+              : <CloudUpload className="w-5 h-5 shrink-0" />}
+            {notice.text}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-university-green uppercase tracking-tight">University Registry</h2>
+          <h2 className="text-xl sm:text-2xl font-black text-university-green uppercase tracking-tight">University Registry</h2>
           <p className="text-slate-500 text-sm font-medium">Manage student identification records and digital ID status.</p>
+          {(!online || fromCache) && (
+            <p className="text-amber-600 text-[10px] font-black uppercase tracking-widest mt-1 flex items-center gap-1.5">
+              <WifiOff className="w-3 h-3" />
+              Offline — showing locally saved registry
+            </p>
+          )}
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row gap-3">
           <button
-            onClick={() => {
-              setEditingStudent(null);
-              setFormData({
-                name: '',
-                email: '',
-                registrationNumber: '',
-                department: DEPARTMENTS[0],
-                admissionYear: 2025,
-                level: calculateLevel(2025),
-                passportURL: '',
-                status: 'active',
-                phone: '',
-                gender: 'Male',
-                dob: '',
-                bloodGroup: 'O+',
-                religion: 'Christianity'
-              });
-              setIsModalOpen(true);
-            }}
+            onClick={openCreate}
             className="bg-university-green hover:bg-university-green/90 text-white px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-100"
           >
             <UserPlus className="w-5 h-5 text-university-yellow" />
-            Enroll New Student
+            Register New Student
           </button>
-          
+
           <button
             onClick={logout}
             className="bg-red-50 hover:bg-red-100 text-red-600 px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm"
@@ -239,7 +208,7 @@ export function AdminDashboard() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Search by name, ID or email..."
+              placeholder="Search by name, registration number or email..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-university-green focus:border-transparent outline-none transition-all text-sm"
@@ -247,12 +216,47 @@ export function AdminDashboard() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Mobile: card list */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {loading ? (
+            <p className="px-6 py-12 text-center text-slate-300 font-bold uppercase tracking-widest text-xs">Accessing Database...</p>
+          ) : filteredStudents.length === 0 ? (
+            <p className="px-6 py-12 text-center text-slate-400 font-medium italic">No student records found.</p>
+          ) : (
+            filteredStudents.map((student) => (
+              <div key={student.docId} className="p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <img
+                    src={student.passportURL || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&q=80"}
+                    alt=""
+                    className="w-12 h-12 rounded-xl object-cover ring-2 ring-white shadow-sm shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-slate-900 leading-tight truncate">{student.name}</p>
+                    <p className="text-xs font-medium text-slate-400 truncate">{student.email}</p>
+                    <p className="font-mono text-xs font-black text-university-green mt-1">{student.id}</p>
+                  </div>
+                  {rowActions(student)}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  <span className="font-bold text-slate-600">{student.department}</span>
+                  <span className="text-slate-300">·</span>
+                  <span className="uppercase font-black text-slate-400 text-[10px]">{student.level}</span>
+                  {statusBadge(student)}
+                  {pendingBadge(student)}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Desktop: table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="text-slate-400 text-[10px] font-black border-b border-slate-100 uppercase tracking-widest">
                 <th className="px-6 py-4">Student Identity</th>
-                <th className="px-6 py-4">Identity Number</th>
+                <th className="px-6 py-4">Registration Number</th>
                 <th className="px-6 py-4">Department & Level</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4 text-right">Actions</th>
@@ -272,9 +276,9 @@ export function AdminDashboard() {
                   <tr key={student.docId} className="hover:bg-university-green/5 transition-colors group">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <img 
-                          src={student.passportURL || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&q=80"} 
-                          alt="" 
+                        <img
+                          src={student.passportURL || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&q=80"}
+                          alt=""
                           className="w-12 h-12 rounded-xl object-cover ring-2 ring-white shadow-sm"
                         />
                         <div>
@@ -293,40 +297,13 @@ export function AdminDashboard() {
                       <div className="text-[10px] uppercase font-black text-slate-400 mt-0.5">{student.level}</div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={cn(
-                        "inline-flex items-center gap-1.5 text-[10px] uppercase font-black px-2.5 py-1 rounded-full border shadow-xs",
-                        student.status === 'active' ? "text-emerald-700 bg-emerald-50 border-emerald-100" :
-                        student.status === 'suspended' ? "text-amber-700 bg-amber-50 border-amber-100" :
-                        "text-slate-500 bg-slate-50 border-slate-100"
-                      )}>
-                        {student.status === 'active' ? <CheckCircle2 className="w-3.5 h-3.5" /> :
-                         student.status === 'suspended' ? <AlertCircle className="w-3.5 h-3.5" /> :
-                         <XCircle className="w-3.5 h-3.5" />}
-                        {student.status}
-                      </span>
+                      <div className="flex flex-col items-start gap-1">
+                        {statusBadge(student)}
+                        {pendingBadge(student)}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button 
-                          onClick={() => openEdit(student)}
-                          className="p-2 text-slate-400 hover:text-university-green hover:bg-slate-50 transition-all rounded-lg"
-                          title="Edit Record"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => handleDelete(student.docId || toDocId(student.id))}
-                          className={cn(
-                            "p-2 transition-all rounded-lg",
-                            deletingId === student.docId 
-                              ? "text-white bg-red-500 hover:bg-red-600 font-bold px-3 text-xs" 
-                              : "text-slate-400 hover:text-red-500 hover:bg-red-50"
-                          )}
-                          title="Delete Record"
-                        >
-                          {deletingId === student.docId ? 'Confirm' : <Trash2 className="w-4 h-4" />}
-                        </button>
-                      </div>
+                      {rowActions(student)}
                     </td>
                   </tr>
                 ))
@@ -336,10 +313,10 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      {/* Modal */}
+      {/* Registration / edit modal — the same workflow students use */}
       <AnimatePresence>
         {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -351,205 +328,43 @@ export function AdminDashboard() {
               initial={{ opacity: 0, scale: 0.98, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.98, y: 10 }}
-              className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl relative overflow-hidden border-t-8 border-university-green"
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl relative overflow-hidden border-t-8 border-university-green max-h-[92dvh] flex flex-col"
             >
-              <div className="p-8 border-b border-slate-100 relative">
-                 <div className="absolute top-0 right-0 p-8">
-                    <div className="bg-university-green/5 p-3 rounded-2xl rotate-6">
-                       <UserPlus className="w-6 h-6 text-university-green" />
-                    </div>
-                 </div>
-                <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">
-                  {editingStudent ? 'Update Registry Record' : 'New Enrollment'}
+              <div className="p-5 sm:p-8 border-b border-slate-100 relative shrink-0">
+                <button
+                  onClick={() => setIsModalOpen(false)}
+                  className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <h3 className="text-xl sm:text-2xl font-black text-slate-900 uppercase tracking-tight pr-10">
+                  {editingStudent ? 'Update Registry Record' : 'Register New Student'}
                 </h3>
                 <p className="text-slate-500 text-sm font-medium mt-1">
-                  {editingStudent ? 'Modify the existing information for this student.' : 'Enter details below to generate a new digital identification number.'}
+                  {editingStudent
+                    ? 'Modify the existing information for this student.'
+                    : 'The same registration workflow students use — identical fields and validation.'}
                 </p>
               </div>
 
-              <form onSubmit={handleSubmit} className="p-8 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Full Student Name</label>
-                    <input
-                      required
-                      type="text"
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-university-green focus:bg-white transition-all font-bold text-slate-800"
-                      value={formData.name}
-                      onChange={e => setFormData({...formData, name: e.target.value})}
-                      placeholder="Enter Full Legal Name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Digital Mailbox</label>
-                    <input
-                      required
-                      type="email"
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-university-green focus:bg-white transition-all font-bold text-slate-800"
-                      value={formData.email}
-                      onChange={e => setFormData({...formData, email: e.target.value})}
-                      placeholder="student@coou.edu.ng"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Faculty/Department</label>
-                    <select
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-university-green focus:bg-white transition-all font-bold text-slate-800"
-                      value={formData.department}
-                      onChange={e => setFormData({...formData, department: e.target.value})}
-                    >
-                      {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Admission Year</label>
-                    <input
-                      type="number"
-                      required
-                      min="1990"
-                      max="2030"
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-university-green focus:bg-white transition-all font-bold text-slate-800"
-                      value={formData.admissionYear || ''}
-                      onChange={e => {
-                        const year = parseInt(e.target.value) || 0;
-                        setFormData({
-                          ...formData, 
-                          admissionYear: year,
-                          level: calculateLevel(year)
-                        })
-                      }}
-                    />
-                    <p className="text-[9px] font-bold text-university-green uppercase tracking-wider mt-1 ml-1 opacity-80">
-                      Calculated Level: {formData.level}
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Registration Number *</label>
-                     <input
-                        type="text" required
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-university-green focus:bg-white transition-all font-bold text-slate-800 uppercase"
-                        placeholder="Enter Registration Number"
-                        value={formData.registrationNumber}
-                        onChange={e => setFormData({...formData, registrationNumber: e.target.value.toUpperCase()})}
-                     />
-                  </div>
-                  <div className="space-y-2">
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Phone Number</label>
-                     <input type="tel"
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-university-green focus:bg-white transition-all font-bold text-slate-800"
-                        placeholder="e.g. 08012345678"
-                        value={formData.phone} 
-                        onChange={e => setFormData({...formData, phone: e.target.value})} />
-                  </div>
-                  <div className="space-y-2">
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Date of Birth</label>
-                     <input type="date"
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-university-green focus:bg-white transition-all font-bold text-slate-800"
-                        value={formData.dob} 
-                        onChange={e => setFormData({...formData, dob: e.target.value})} />
-                  </div>
-                  <div className="space-y-2">
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gender</label>
-                     <select className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-university-green focus:bg-white transition-all font-bold text-slate-800"
-                        value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value})}>
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                     </select>
-                  </div>
-                  <div className="space-y-2">
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Blood Group</label>
-                     <select className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-university-green focus:bg-white transition-all font-bold text-slate-800"
-                        value={formData.bloodGroup} onChange={e => setFormData({...formData, bloodGroup: e.target.value})}>
-                        {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map(bg => <option key={bg} value={bg}>{bg}</option>)}
-                     </select>
-                  </div>
-                  <div className="space-y-2">
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Religion</label>
-                     <select className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-university-green focus:bg-white transition-all font-bold text-slate-800"
-                        value={formData.religion} onChange={e => setFormData({...formData, religion: e.target.value})}>
-                        <option value="Christianity">Christianity</option>
-                        <option value="Islam">Islam</option>
-                        <option value="Other">Other</option>
-                     </select>
-                  </div>
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Verified Passport Photograph</label>
-                    <div className="flex flex-col sm:flex-row gap-4 sm:items-center">
-                       <label className="flex-1 cursor-pointer group">
-                         <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl hover:border-university-green hover:bg-university-green/5 transition-all text-center flex items-center justify-center gap-2">
-                            {isUploading ? (
-                               <div className="w-4 h-4 border-2 border-university-green border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                               <Camera className="w-4 h-4 text-slate-400 group-hover:text-university-green" />
-                            )}
-                            <span className="text-xs font-bold text-slate-500 group-hover:text-university-green">
-                              {isUploading ? "Processing Image..." : formData.passportURL ? "Change Initialized Photograph" : "Upload Image Files (Auto-compressed)"}
-                            </span>
-                         </div>
-                         <input
-                           type="file"
-                           accept="image/*"
-                           className="hidden"
-                           onChange={async (e) => {
-                             const file = e.target.files?.[0];
-                             if (!file) return;
-                             setIsUploading(true);
-                             try {
-                               const base64 = await compressImage(file);
-                               setFormData({...formData, passportURL: base64});
-                             } catch(err) {
-                               alert("Failed to process image");
-                             } finally {
-                               setIsUploading(false);
-                             }
-                           }}
-                         />
-                       </label>
-                      <div className="w-16 h-16 rounded-xl border-2 border-slate-200 bg-slate-50 flex items-center justify-center shrink-0 overflow-hidden shadow-sm">
-                        {formData.passportURL ? (
-                          <img src={formData.passportURL} className="w-full h-full object-cover" />
-                        ) : (
-                          <UserPlus className="w-6 h-6 text-slate-300" />
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Registry Status</label>
-                    <select
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-university-green focus:bg-white transition-all font-bold text-slate-800"
-                      value={formData.status}
-                      onChange={e => setFormData({...formData, status: e.target.value as any})}
-                    >
-                      <option value="active">Active/Enrolled</option>
-                      <option value="suspended">Suspended/Withdrawn</option>
-                      <option value="graduated">Alumni/Graduated</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="pt-6 flex flex-col md:flex-row gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setIsModalOpen(false)}
-                    className="flex-1 px-8 py-4 rounded-xl border border-slate-200 font-bold text-slate-500 hover:bg-slate-50 transition-all uppercase text-xs tracking-widest"
-                  >
-                    Discard Changes
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSaving}
-                    className="flex-1 px-8 py-4 rounded-xl bg-university-green text-white font-bold hover:bg-university-green/90 transition-all shadow-lg shadow-emerald-100 uppercase text-xs tracking-widest flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                  >
-                    {isSaving ? (
-                      <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="w-4 h-4 text-university-yellow" />
-                    )}
-                    <span>{isSaving ? 'Saving...' : editingStudent ? 'Apply Updates' : 'Generate Student Number'}</span>
-                  </button>
-                </div>
-              </form>
+              <div className="p-5 sm:p-8 overflow-y-auto">
+                <StudentRegistrationForm
+                  mode="admin"
+                  initial={editingStudent}
+                  onCancel={() => setIsModalOpen(false)}
+                  onSaved={(record, outcome) => {
+                    setIsModalOpen(false);
+                    setEditingStudent(null);
+                    showNotice(
+                      outcome.synced ? 'synced' : 'queued',
+                      outcome.synced
+                        ? `${record.name} (${record.id}) has been saved to the registry.`
+                        : `${record.name} (${record.id}) was saved on this device and will sync to the registry automatically.`
+                    );
+                  }}
+                />
+              </div>
             </motion.div>
           </div>
         )}

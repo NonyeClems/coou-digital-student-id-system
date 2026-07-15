@@ -10,6 +10,8 @@ import {
   updateProfile
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { findStudentByRegNo } from './lib/students';
+import { resolveLoginEmail } from './lib/login';
 
 export interface User {
   uid: string;
@@ -22,10 +24,13 @@ interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  /** Signs in with either an email address or a registration number. */
+  login: (identifier: string, password: string) => Promise<void>;
   signup: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  /** Persists the registration number on the user's profile so the ID card is looked up by it. */
+  linkStudentRecord: (studentDocId: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -110,7 +115,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const login = async (email: string, password: string) => {
+  const login = async (identifier: string, password: string) => {
+    const email = await resolveLoginEmail(identifier, findStudentByRegNo);
     await signInWithEmailAndPassword(auth, email, password);
   };
 
@@ -137,6 +143,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const linkStudentRecord = async (studentDocId: string) => {
+    if (!user) return;
+    const current = profile;
+    if (!current || current.studentId === studentDocId) return;
+    const updated: UserProfile = { ...current, studentId: studentDocId };
+    setProfile(updated);
+    try {
+      await setDoc(doc(db, 'profiles', user.uid), updated);
+    } catch (error) {
+      // Offline writes are queued by the persistent cache; anything else is
+      // non-fatal (the portal falls back to the email lookup).
+      console.error('Failed to link student record to profile:', error);
+    }
+  };
+
   const logout = async () => {
     await signOut(auth);
   };
@@ -146,7 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, login, signup, logout, resetPassword }}>
+    <AuthContext.Provider value={{ user, profile, loading, login, signup, logout, resetPassword, linkStudentRecord }}>
       {children}
     </AuthContext.Provider>
   );

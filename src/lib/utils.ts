@@ -29,7 +29,42 @@ export function generateStudentId(department: string, year?: number) {
  * "2021/CS/1234"), so they are replaced with hyphens.
  */
 export function toDocId(registrationNumber: string) {
-  return registrationNumber.trim().replace(/\//g, '-');
+  return normalizeRegNo(registrationNumber).replace(/\//g, '-');
+}
+
+/**
+ * Canonical form of a registration number: trimmed, uppercased, internal
+ * whitespace removed. All storage, lookups and comparisons go through this
+ * so "2021/cs/1234 " and "2021/CS/1234" resolve to the same student.
+ */
+export function normalizeRegNo(registrationNumber: string) {
+  return registrationNumber.trim().toUpperCase().replace(/\s+/g, '');
+}
+
+/**
+ * Validates a registration number. Accepts the formats in use at COOU:
+ * segments of letters/digits separated by "/" or "-" (e.g. "2021/CS/1234",
+ * "COOU/2021/12345") as well as plain numeric identifiers ("20212241234").
+ * Returns an error message, or null when the number is valid.
+ */
+export function validateRegNo(registrationNumber: string): string | null {
+  const reg = normalizeRegNo(registrationNumber);
+  if (!reg) return 'Registration Number is required.';
+  if (reg.length < 6) return 'Registration Number is too short (minimum 6 characters).';
+  if (reg.length > 30) return 'Registration Number is too long (maximum 30 characters).';
+  if (!/^[A-Z0-9]+([/-][A-Z0-9]+)*$/.test(reg)) {
+    return 'Registration Number may only contain letters, digits, "/" and "-".';
+  }
+  if (!/\d/.test(reg)) return 'Registration Number must contain at least one digit.';
+  return null;
+}
+
+/**
+ * Distinguishes the two identifiers accepted at login: an email address or a
+ * registration number.
+ */
+export function isEmailIdentifier(identifier: string) {
+  return identifier.includes('@');
 }
 
 /**

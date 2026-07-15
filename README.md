@@ -1,6 +1,13 @@
 # COOU Digital Student ID System
 
-A web application for **Chukwuemeka Odumegwu Ojukwu University (COOU)** that issues, manages, and verifies digital student identity cards. Students self-enroll and receive a downloadable digital ID card containing a unique QR code; anyone (security staff, lecturers, external parties) can scan that QR code with a standard phone camera or the built-in scanner to confirm the student's identity and registration status against the live university registry.
+A web application for **Chukwuemeka Odumegwu Ojukwu University (COOU)** that issues, manages, and verifies digital student identity cards. Students self-enroll (or are registered by an administrator) and receive a landscape digital ID card — downloadable, printable, and carrying a unique QR code; anyone (security staff, lecturers, external parties) can scan that QR code with a standard phone camera or the built-in scanner to confirm the student's identity and registration status against the live university registry.
+
+**Key properties:**
+
+- **The registration number is the primary identifier** — it is the student record's document ID, the QR payload, and a login credential (students sign in with their registration number *or* email).
+- **Offline-first** — the app shell is served by a service worker and all data lives in Firestore's persistent local cache, so viewing the ID card, registering students, and admin operations keep working with no connection; local changes synchronize with Firebase automatically when connectivity returns.
+- **One registration workflow** — administrators register students through exactly the same form and validation rules as student self-enrollment.
+- **Fully responsive** — phones, tablets, laptops, and desktops.
 
 ---
 
@@ -17,9 +24,10 @@ A web application for **Chukwuemeka Odumegwu Ojukwu University (COOU)** that iss
 9. [Administrator Credentials](#9-administrator-credentials)
 10. [Backend Verification Suite](#10-backend-verification-suite)
 11. [QR Code Verification — How It Works](#11-qr-code-verification--how-it-works)
-12. [Deployment](#12-deployment)
-13. [Troubleshooting](#13-troubleshooting)
-14. [Assumptions, Limitations & External Services](#14-assumptions-limitations--external-services)
+12. [Offline-First Architecture & Synchronization](#12-offline-first-architecture--synchronization)
+13. [Deployment](#13-deployment)
+14. [Troubleshooting](#14-troubleshooting)
+15. [Assumptions, Limitations & External Services](#15-assumptions-limitations--external-services)
 
 ---
 
@@ -50,29 +58,38 @@ This is a **single-page application (SPA)** with a **serverless backend**. There
 | File | Purpose |
 |---|---|
 | `src/App.tsx` | Routing, landing (login/signup/reset) page, route guards |
-| `src/AuthContext.tsx` | Auth state, login/signup/logout, role assignment, admin allow-list |
-| `src/components/StudentPortal.tsx` | Student self-enrollment and the digital ID card (with QR code) |
-| `src/components/AdminDashboard.tsx` | Admin CRUD over all student records |
+| `src/AuthContext.tsx` | Auth state, login/signup/logout, role assignment, admin allow-list, profile↔student linking |
+| `src/components/StudentPortal.tsx` | Student self-enrollment and the digital ID card (download / print / share) |
+| `src/components/AdminDashboard.tsx` | Admin CRUD over all student records (responsive table/card views) |
+| `src/components/StudentRegistrationForm.tsx` | **The single registration workflow** shared by students and admins |
+| `src/components/IdCard.tsx` | Landscape (CR80) ID card canvas + responsive scaling + print copy |
+| `src/components/SyncStatusIndicator.tsx` | Global offline / syncing / synced banner |
 | `src/components/Scanner.tsx` | In-app camera QR scanner |
 | `src/VerificationPortal.tsx` | Public page a scanned QR resolves to (`/verify/:id`) |
-| `src/lib/firebase.ts` | Firebase initialization from environment variables (+ emulator wiring) |
-| `src/lib/utils.ts` | ID sanitization, level calculation, image compression, QR base URL |
+| `src/lib/firebase.ts` | Firebase initialization + **persistent offline cache** (+ emulator wiring) |
+| `src/lib/students.ts` | Offline-aware data layer for the `students` collection (saves, lookups, live subscriptions) |
+| `src/lib/login.ts` | Login identifier resolution (registration number → account email) |
+| `src/lib/validation.ts` | Registration business rules (shared by both workflows, unit-tested) |
+| `src/lib/utils.ts` | Reg-number normalization/validation, level calculation, image compression, QR base URL |
+| `src/hooks/useOnlineStatus.ts` | Browser connectivity hook |
 | `src/constants.ts` | Departments, department codes, university branding |
 | `src/types.ts` | `Student` and `UserProfile` data models |
 | `firestore.rules` | Firestore security rules (role-based access control) |
 | `firebase.json` | Firebase Emulator Suite configuration (ports, Emulator UI) |
+| `vite.config.ts` | Vite + Tailwind + PWA (service worker / offline app shell) configuration |
 | `scripts/dev-menu.mjs` | Interactive terminal menu (`npm start`) with Start Over / Exit |
 | `scripts/seed-admin.mjs` | Seeds the local admin account into the emulators |
-| `scripts/verify-backend.mjs` | End-to-end backend verification suite (24 checks) |
+| `scripts/verify-backend.mjs` | End-to-end backend verification suite (28 checks) |
 | `scripts/test-backend.mjs` | Runs the suite, managing emulator startup/cleanup |
+| `src/**/*.test.ts(x)` | Vitest unit tests (validation, identifiers, login resolution, ID card) |
 
 ### Data model (Firestore)
 
-**`students` collection** — one document per student. The **document ID is the registration number** with any `/` characters replaced by `-` (Firestore does not allow slashes in document IDs).
+**`students` collection** — one document per student. The **document ID is the registration number** (normalized: trimmed, uppercased, whitespace removed) with any `/` characters replaced by `-` (Firestore does not allow slashes in document IDs). Because document IDs are deterministic, the registration number is unique by construction — offline writes replayed during synchronization always land on the same document and can never create duplicates.
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | string | Registration number exactly as entered |
+| `id` | string | Registration number (normalized, uppercase) — the primary identifier |
 | `docId` | string | Sanitized registration number (same as document ID) |
 | `name`, `email` | string | |
 | `department` | string | One of `DEPARTMENTS` in `src/constants.ts` |
@@ -83,7 +100,7 @@ This is a **single-page application (SPA)** with a **serverless backend**. There
 | `phone`, `gender`, `dob`, `bloodGroup`, `religion` | string | Optional |
 | `createdAt`, `updatedAt` | number | Unix ms timestamps |
 
-**`profiles` collection** — one document per authenticated user, keyed by Firebase Auth UID: `uid`, `email`, `displayName`, `role` (`admin` \| `staff` \| `student`).
+**`profiles` collection** — one document per authenticated user, keyed by Firebase Auth UID: `uid`, `email`, `displayName`, `role` (`admin` \| `staff` \| `student`), and `studentId` (the linked student record's registration number in document-ID form, set automatically once the account is matched to a registry record so the ID card is looked up by the primary identifier).
 
 ---
 
@@ -102,6 +119,8 @@ This is a **single-page application (SPA)** with a **serverless backend**. There
 | Icons | lucide-react | — |
 | Card image export | html-to-image | — |
 | Animations (non-landing pages) | motion | 12 |
+| Offline app shell (service worker) | vite-plugin-pwa (Workbox) | 1 |
+| Unit tests | Vitest + Testing Library (jsdom) | — |
 
 > Note: `package.json` also lists `@google/genai`, `express`, `dotenv`, and `html2canvas`. These are **not used** by the application (leftovers from the original AI Studio template) and are tree-shaken out of the production bundle.
 
@@ -198,10 +217,10 @@ npx firebase deploy --only firestore:rules --project <your-project-id>
 
 What they enforce:
 
-- **`students`** — publicly readable (so any phone can verify a scanned QR code without an account). Admins/staff can create, update, and delete any record; a signed-in student can only write/delete the record bearing their own email.
+- **`students`** — publicly readable (so any phone can verify a scanned QR code without an account). Admins/staff can create, update, and delete any record. A signed-in student can only **create** a record bearing their own email, and can only **update/delete** a record that *already* bears their email — so an existing registration number can never be overwritten or hijacked by a different account, including writes replayed later by offline synchronization.
 - **`profiles`** — each user can read/write only their own profile, and the `admin`/`staff` role can only be stored for emails on the admin allow-list (see [Administrator Credentials](#9-administrator-credentials)). This means a tampered client **cannot** self-promote to admin — the allow-list is enforced server-side.
 
-> Public read on `students` is a deliberate product decision — it is what lets any phone verify a scanned ID without logging in. If that is unacceptable, verification must be moved behind a Cloud Function; see [Limitations](#14-assumptions-limitations--external-services).
+> Public read on `students` is a deliberate product decision — it is what lets any phone verify a scanned ID without logging in. If that is unacceptable, verification must be moved behind a Cloud Function; see [Limitations](#15-assumptions-limitations--external-services).
 
 ### 6.5 Indexes
 
@@ -245,7 +264,9 @@ If the default app port 3000 is taken, launch with another one: `PORT=3001 npm s
 | `npm run dev:emulators` | Dev server only, in **emulator mode** (expects emulators already running) |
 | `npm run emulators` | Firebase Local Emulator Suite only (Auth + Firestore + Emulator UI) |
 | `npm run seed:admin` | Creates the local admin account in the running emulators |
-| `npm run test:backend` | **Backend verification suite** — 24 end-to-end checks (starts/stops emulators automatically) |
+| `npm test` | **Unit tests** (Vitest): validation rules, identifier handling, login resolution, ID card rendering |
+| `npm run test:watch` | Unit tests in watch mode |
+| `npm run test:backend` | **Backend verification suite** — 28 end-to-end checks (starts/stops emulators automatically) |
 | `npm run lint` | Type-checks the entire project (`tsc --noEmit`) |
 | `npm run build` | Production build into `dist/` |
 | `npm run preview` | Serves the production build locally (for pre-deployment smoke tests) |
@@ -316,14 +337,17 @@ To grant `staff` (dashboard access without the admin badge), add the email to bo
 
 ## 10. Backend Verification Suite
 
-`npm run test:backend` (or `npm start` → **[3]**) runs **24 automated end-to-end checks** against the emulator-backed Firestore — the exact reads/writes the app performs, plus adversarial cases:
+`npm run test:backend` (or `npm start` → **[3]**) runs **28 automated end-to-end checks** against the emulator-backed Firestore — the exact reads/writes the app performs, plus adversarial cases:
 
 1. **Account registration** — Auth signup, profile document persistence.
 2. **Enrollment** — the student record is written with the full data-model structure and exact values, is immediately queryable, and duplicate registration numbers are detectable.
 3. **QR verification** — the QR payload round-trips to the right document ID; an **unauthenticated** client (a phone that scanned the code) resolves the record; Student A's QR yields only Student A; unknown IDs report "not found" without crashing.
-4. **Administrator** — admin credentials authenticate, the allow-listed email may hold the admin role, admin can enroll/update/list/delete any student.
-5. **Role-based access control** — unauthenticated writes are rejected; a student cannot overwrite or delete another student's record, cannot self-promote to admin, and cannot read another user's profile.
-6. **Deletion lifecycle** — deleted records immediately fail verification gracefully.
+4. **Registration number as primary identifier** — the number resolves to the login email (the regNo-login flow), and the auth profile links to the record by registration number.
+5. **Administrator** — admin credentials authenticate, the allow-listed email may hold the admin role, admin can enroll/update/list/delete any student.
+6. **Role-based access control** — unauthenticated writes are rejected; a student cannot overwrite or delete another student's record, **cannot hijack an existing registration number with their own email**, can still update their own record, cannot self-promote to admin, and cannot read another user's profile.
+7. **Deletion lifecycle** — deleted records immediately fail verification gracefully.
+
+There is also a **unit test suite** (`npm test`, Vitest + Testing Library): registration-number normalization/validation, the shared registration business rules, login-identifier resolution, and the landscape ID card (CR80 proportions, required fields, verification QR, suspended state, print copy).
 
 The suite exits non-zero on any failure, so it can be used in CI. If the emulators are already running it reuses them; otherwise it starts and stops them automatically.
 
@@ -348,12 +372,35 @@ The suite exits non-zero on any failure, so it can be used in CI. If the emulato
 - **Testing QR codes from a real phone during development:** the dev console (`npm start`) automatically points QR codes at this machine's LAN address (e.g. `http://192.168.x.x:3000`) when `VITE_APP_BASE_URL` is not set, and both the dev server and the emulators listen on all interfaces — so a phone on the same Wi-Fi can scan a card rendered on your desktop and load the verification page end-to-end.
 
 - **Deployment requirements for QR codes to keep working** (both covered by this repo / docs):
-  1. The host must rewrite all paths to `index.html` (see [Deployment](#12-deployment)) so `/verify/...` deep links don't 404.
+  1. The host must rewrite all paths to `index.html` (see [Deployment](#13-deployment)) so `/verify/...` deep links don't 404.
   2. Set `VITE_APP_BASE_URL` to the production URL before building, so cards always encode the live domain.
 
 ---
 
-## 12. Deployment
+## 12. Offline-First Architecture & Synchronization
+
+The application keeps working with no internet connection and synchronizes automatically when connectivity returns. Two independent layers provide this:
+
+1. **App shell (service worker)** — `vite-plugin-pwa` precaches the built HTML/JS/CSS/icons, so the app itself loads offline after the first visit (production builds only; the app is also installable as a PWA). Firebase API traffic is deliberately **not** intercepted by the service worker — the SDK manages its own offline queue.
+2. **Data (Firestore persistent cache)** — Firestore runs with `persistentLocalCache` (IndexedDB, multi-tab safe). Every read is served cache-first when offline; every write made offline is stored durably (it survives reloads and restarts) and pushed to the server automatically on reconnect. Firebase is the source of truth once synchronization completes (server timestamps and last-write-wins).
+
+**What works offline:**
+
+- Viewing the digital ID card (once loaded on the device) — students and admins.
+- Student self-enrollment and admin registration/edit/delete — writes are queued locally; the UI explicitly reports *"saved on this device, will sync automatically"* vs. *"saved to the registry"*.
+- The admin registry list (from the local cache), with a per-record **"Sync pending"** badge until the server acknowledges each queued change.
+- A global banner reports **Offline → Synchronizing → All changes synchronized** transitions (`waitForPendingWrites` confirms the queue is fully flushed).
+
+**What needs a connection (by design):**
+
+- The **first** sign-in on a device (Firebase Auth must verify the password). Previously signed-in sessions are restored offline.
+- QR verification of *other* students' records that were never loaded on the verifying device.
+
+**Duplicate prevention & conflict handling:** the registration number is the record's document ID, so a write replayed by synchronization always lands on the same document — sync can never create a duplicate. The duplicate-registration guard checks the server (falling back to the local cache offline), and the Firestore security rules additionally guarantee that an existing record can never be taken over by another account, even by a replayed offline write. Concurrent edits resolve last-write-wins; `updatedAt` records the winner.
+
+---
+
+## 13. Deployment
 
 The production build is a fully static site (`dist/`) — it can be hosted anywhere that serves static files **and supports SPA rewrites** (all routes → `index.html`).
 
@@ -395,7 +442,7 @@ location / {
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 | Symptom | Cause & fix |
 |---|---|
@@ -403,7 +450,7 @@ location / {
 | `auth/operation-not-allowed` on signup | Email/Password provider not enabled — see [6.2](#62-enable-authentication). (Not applicable in emulator mode.) |
 | `auth/unauthorized-domain` on the deployed site | Add the domain under Firebase Auth → Settings → Authorized domains. |
 | `Missing or insufficient permissions` (Firestore) | Security rules not published or too strict — publish [firestore.rules](firestore.rules), see [6.4](#64-security-rules). Also occurs legitimately when a non-admin attempts an admin operation. |
-| Scanned QR code opens a 404 | The host is not rewriting routes to `index.html` — see [Deployment](#12-deployment). |
+| Scanned QR code opens a 404 | The host is not rewriting routes to `index.html` — see [Deployment](#13-deployment). |
 | Scanned QR opens `http://localhost:3000/...` | The card was generated from a build without `VITE_APP_BASE_URL`. Set it and rebuild; the card view re-renders the QR from live data, so no data fix is needed. (The dev console auto-substitutes your LAN IP during development.) |
 | In-app scanner camera never starts | Browsers only expose the camera on **HTTPS or localhost**. Test on `localhost` or the deployed HTTPS site, and accept the camera permission prompt. |
 | "This Registration Number is already registered to another account" | Registration numbers are unique document IDs. Use the correct number, or have an admin delete/edit the conflicting record. |
@@ -415,7 +462,7 @@ location / {
 
 ---
 
-## 14. Assumptions, Limitations & External Services
+## 15. Assumptions, Limitations & External Services
 
 **External services (the only one):**
 - **Firebase** (Auth + Cloud Firestore) — and only in production; local development runs entirely on the offline Emulator Suite. Free Spark plan suffices for moderate usage. No other APIs, servers, or databases are required.

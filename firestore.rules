@@ -25,12 +25,19 @@ service cloud.firestore {
 
     // Student records: publicly readable so a scanned QR code can be
     // verified from any device without an account. Writes are restricted:
-    // admins/staff manage any record, a student may only create/update/delete
-    // the record bearing their own signed-in email.
+    // admins/staff manage any record; a student may only create a record
+    // bearing their own signed-in email, and may only update/delete a record
+    // that ALREADY bears their email (so an existing student record can never
+    // be overwritten or hijacked by a different account — including writes
+    // replayed later by offline synchronization).
     match /students/{studentId} {
       allow read: if true;
-      allow create, update: if isAdminOrStaff() ||
+      allow create: if isAdminOrStaff() ||
         (isSignedIn() && request.resource.data.email == request.auth.token.email);
+      allow update: if isAdminOrStaff() ||
+        (isSignedIn() &&
+          resource.data.email == request.auth.token.email &&
+          request.resource.data.email == request.auth.token.email);
       allow delete: if isAdminOrStaff() ||
         (isSignedIn() && resource.data.email == request.auth.token.email);
     }

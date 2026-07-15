@@ -1,6 +1,6 @@
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
-import { IdCard, LogOut, QrCode, ShieldCheck, User, Search, LayoutDashboard } from 'lucide-react';
+import { IdCard, LogOut, QrCode, ShieldCheck, User, LayoutDashboard } from 'lucide-react';
 import { UNIVERSITY_NAME } from '../constants';
 
 export function Navbar() {
@@ -27,30 +27,17 @@ export function Navbar() {
         <div className="flex items-center gap-2 md:gap-4 overflow-x-auto no-scrollbar">
           <div className="flex bg-slate-100 p-1 rounded-xl">
             {isAdminOrStaff ? (
-              <>
-                <button
-                  onClick={() => navigate('/')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${
-                    isActive('/') 
-                      ? 'bg-white text-university-green shadow-sm' 
-                      : 'text-slate-500 hover:text-university-green'
-                  }`}
-                >
-                  <LayoutDashboard className="w-4 h-4" />
-                  <span className="hidden md:inline">Dashboard</span>
-                </button>
-                <button
-                  onClick={() => navigate('/')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${
-                    isActive('/') 
-                      ? 'text-university-green' 
-                      : 'text-slate-500 hover:text-university-green'
-                  }`}
-                >
-                  <Search className="w-4 h-4" />
-                  <span className="hidden md:inline">Search</span>
-                </button>
-              </>
+              <button
+                onClick={() => navigate('/')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${
+                  isActive('/')
+                    ? 'bg-white text-university-green shadow-sm'
+                    : 'text-slate-500 hover:text-university-green'
+                }`}
+              >
+                <LayoutDashboard className="w-4 h-4" />
+                <span className="hidden md:inline">Dashboard</span>
+              </button>
             ) : (
               <button
                 onClick={() => navigate('/')}
@@ -78,7 +65,7 @@ export function Navbar() {
             </button>
           </div>
 
-          <div className="h-6 w-[1px] bg-slate-200 mx-1 md:mx-2 hidden sm:block" />
+          <div className="h-6 w-px bg-slate-200 mx-1 md:mx-2 hidden sm:block" />
 
           <div className="flex items-center gap-2 md:gap-3">
             <div className="text-right hidden md:block">

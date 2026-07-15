@@ -9,6 +9,8 @@
     "dev:emulators": "vite --mode emulators --port=3000 --host=0.0.0.0",
     "emulators": "firebase emulators:start --project demo-coou-student-id",
     "seed:admin": "node scripts/seed-admin.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:backend": "node scripts/test-backend.mjs",
     "build": "vite build",
     "preview": "vite preview",
@@ -36,15 +38,20 @@
     "vite": "^6.2.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
     "firebase-tools": "^15.23.0",
+    "jsdom": "^28.1.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^4.1.10"
   }
 }

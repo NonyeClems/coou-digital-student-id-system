@@ -1,6 +1,11 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  connectFirestoreEmulator,
+} from 'firebase/firestore';
 
 // Your Firebase configuration using Vite environment variables.
 // If you are setting up the project, add these keys to a `.env.local` file at the root.
@@ -16,9 +21,16 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firebase Services
+// Initialize Firebase Services.
+// Firestore runs with persistent (IndexedDB) offline cache: every read is
+// served cache-first when the network is unavailable, writes made offline are
+// queued durably (they survive page reloads and app restarts) and are pushed
+// to the server automatically as soon as connectivity returns. The multi-tab
+// manager keeps the cache consistent when the app is open in several tabs.
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+});
 
 // Local development against the Firebase Emulator Suite (`npm run dev:emulators`).
 // The emulator host follows the page's hostname rather than being hardcoded to

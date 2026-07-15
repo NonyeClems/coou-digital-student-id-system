@@ -190,6 +190,26 @@ async function main() {
   const unknown = await getDoc(doc(anonymous.db, 'students', 'DOES-NOT-EXIST-123'));
   check('invalid QR id resolves to "record not found" (no crash)', !unknown.exists());
 
+  // -------------------------------------- registration number as primary id
+  section('3b. Registration number is the primary identifier');
+
+  // Login-by-registration-number: before calling Firebase Auth the app
+  // resolves the number to the account email via a public registry read
+  // (mirrors resolveLoginEmail() in src/lib/login.ts).
+  const loginLookup = await getDoc(doc(anonymous.db, 'students', docIdA));
+  check('registration number resolves to the login email (regNo login)',
+    loginLookup.exists() && loginLookup.data().email === emailA);
+
+  // The portal links the auth profile to the record by registration number
+  // so future ID-card lookups use the primary identifier directly.
+  await setDoc(doc(studentA.db, 'profiles', credA.user.uid), {
+    uid: credA.user.uid, email: emailA, displayName: 'Student A', role: 'student',
+    studentId: docIdA,
+  });
+  const linkedProfile = await getDoc(doc(studentA.db, 'profiles', credA.user.uid));
+  check('profile links to the student record by registration number',
+    linkedProfile.exists() && linkedProfile.data().studentId === docIdA);
+
   // ------------------------------------------------------------- admin (3)
   section('4. Administrator authentication and management');
 
@@ -241,6 +261,18 @@ async function main() {
 
   await expectDenied('student cannot overwrite another student\'s record', () =>
     setDoc(doc(studentB.db, 'students', docIdA), { ...studentRecordA, name: 'Impersonated' }));
+
+  // The registration number is the document ID, so a hostile client could try
+  // to take over an existing number by writing it with their OWN email (a
+  // write that offline sync would also happily replay). The update rule
+  // requires the EXISTING record's email to match, so this must be denied.
+  await expectDenied('student cannot hijack an existing registration number with their own email', () =>
+    setDoc(doc(studentB.db, 'students', docIdA), { ...studentRecordA, email: emailB, name: 'Hijacked' }));
+
+  await setDoc(doc(studentA.db, 'students', docIdA), {
+    ...studentRecordA, phone: '08099999999', updatedAt: Date.now(),
+  });
+  ok('student can still update their own record');
 
   await expectDenied('student cannot delete another student\'s record', () =>
     deleteDoc(doc(studentB.db, 'students', docIdA)));
