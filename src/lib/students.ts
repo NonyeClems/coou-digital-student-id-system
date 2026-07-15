@@ -11,10 +11,10 @@ import {
   setDoc,
   where,
   type Unsubscribe,
-} from 'firebase/firestore';
-import { db } from './firebase';
-import { Student } from '../types';
-import { normalizeRegNo, toDocId } from './utils';
+} from "firebase/firestore";
+import { db } from "./firebase";
+import { Student } from "../types";
+import { normalizeRegNo, toDocId } from "./utils";
 
 /**
  * Data-access layer for the `students` collection.
@@ -31,10 +31,10 @@ import { normalizeRegNo, toDocId } from './utils';
  * (`synced: true`) or whether it is queued locally (`synced: false`).
  */
 
-const studentsCol = () => collection(db, 'students');
+const studentsCol = () => collection(db, "students");
 
 export function studentDocRef(regNoOrDocId: string) {
-  return doc(db, 'students', toDocId(regNoOrDocId));
+  return doc(db, "students", toDocId(regNoOrDocId));
 }
 
 /** How long a write may take before we report it as "queued for sync". */
@@ -59,7 +59,10 @@ async function raceServerAck(ack: Promise<unknown>): Promise<SaveOutcome> {
     // later (e.g. a security-rule denial once back online), surface it in the
     // console — the caller's UI has already reported "queued for sync".
     ack.catch((err) =>
-      console.error('[sync] A locally queued write was rejected by the server:', err)
+      console.error(
+        "[sync] A locally queued write was rejected by the server:",
+        err,
+      ),
     );
   }
   return { synced };
@@ -81,7 +84,9 @@ export function removeStudent(docId: string): Promise<SaveOutcome> {
  * Works offline when the record is in the local cache. Falls back to querying
  * the `id` field for legacy records whose document ID differs.
  */
-export async function findStudentByRegNo(regNo: string): Promise<Student | null> {
+export async function findStudentByRegNo(
+  regNo: string,
+): Promise<Student | null> {
   const normalized = normalizeRegNo(regNo);
   if (!normalized) return null;
   try {
@@ -91,17 +96,31 @@ export async function findStudentByRegNo(regNo: string): Promise<Student | null>
     // Offline and not cached — fall through to the query, which resolves from
     // the cache without throwing.
   }
-  const byIdField = await getDocs(
-    query(studentsCol(), where('id', '==', normalized), limit(1))
-  );
-  if (!byIdField.empty) {
-    const d = byIdField.docs[0];
-    return { ...(d.data() as Student), docId: d.id };
+
+  try {
+    const byIdField = await getDocs(
+      query(studentsCol(), where("id", "==", normalized), limit(1)),
+    );
+    if (!byIdField.empty) {
+      const d = byIdField.docs[0];
+      return { ...(d.data() as Student), docId: d.id };
+    }
+  } catch (error) {
+    if (error instanceof Error && /permission/i.test(error.message)) {
+      console.error(
+        "Student lookup by registration number failed due to permissions:",
+        error,
+      );
+      throw error;
+    }
+    console.error("Student lookup by registration number failed:", error);
+    return null;
   }
+
   return null;
 }
 
-export type RegNoAvailability = 'free' | 'taken' | 'own' | 'unknown';
+export type RegNoAvailability = "free" | "taken" | "own" | "unknown";
 
 /**
  * Duplicate-registration guard used by both registration workflows.
@@ -112,15 +131,15 @@ export type RegNoAvailability = 'free' | 'taken' | 'own' | 'unknown';
  */
 export async function checkRegNoAvailability(
   regNo: string,
-  ownEmail?: string | null
+  ownEmail?: string | null,
 ): Promise<RegNoAvailability> {
   try {
     const snap = await getDoc(studentDocRef(regNo));
-    if (!snap.exists()) return 'free';
+    if (!snap.exists()) return "free";
     const data = snap.data() as Student;
-    return ownEmail && data.email === ownEmail ? 'own' : 'taken';
+    return ownEmail && data.email === ownEmail ? "own" : "taken";
   } catch {
-    return 'unknown';
+    return "unknown";
   }
 }
 
@@ -140,19 +159,21 @@ export interface StudentRecordState {
 export function subscribeToStudentByRegNo(
   regNo: string,
   onChange: (state: StudentRecordState) => void,
-  onError?: (error: Error) => void
+  onError?: (error: Error) => void,
 ): Unsubscribe {
   return onSnapshot(
     studentDocRef(regNo),
     { includeMetadataChanges: true },
     (snap) => {
       onChange({
-        student: snap.exists() ? { ...(snap.data() as Student), docId: snap.id } : null,
+        student: snap.exists()
+          ? { ...(snap.data() as Student), docId: snap.id }
+          : null,
         fromCache: snap.metadata.fromCache,
         pendingSync: snap.metadata.hasPendingWrites,
       });
     },
-    onError
+    onError,
   );
 }
 
@@ -160,20 +181,22 @@ export function subscribeToStudentByRegNo(
 export function subscribeToStudentByEmail(
   email: string,
   onChange: (state: StudentRecordState) => void,
-  onError?: (error: Error) => void
+  onError?: (error: Error) => void,
 ): Unsubscribe {
   return onSnapshot(
-    query(studentsCol(), where('email', '==', email), limit(1)),
+    query(studentsCol(), where("email", "==", email), limit(1)),
     { includeMetadataChanges: true },
     (snap) => {
       const d = snap.docs[0];
       onChange({
         student: d ? { ...(d.data() as Student), docId: d.id } : null,
         fromCache: snap.metadata.fromCache,
-        pendingSync: d ? d.metadata.hasPendingWrites : snap.metadata.hasPendingWrites,
+        pendingSync: d
+          ? d.metadata.hasPendingWrites
+          : snap.metadata.hasPendingWrites,
       });
     },
-    onError
+    onError,
   );
 }
 
@@ -193,10 +216,10 @@ export interface StudentListState {
  */
 export function subscribeToAllStudents(
   onChange: (state: StudentListState) => void,
-  onError?: (error: Error) => void
+  onError?: (error: Error) => void,
 ): Unsubscribe {
   return onSnapshot(
-    query(studentsCol(), orderBy('createdAt', 'desc')),
+    query(studentsCol(), orderBy("createdAt", "desc")),
     { includeMetadataChanges: true },
     (snap) => {
       onChange({
@@ -208,6 +231,6 @@ export function subscribeToAllStudents(
         fromCache: snap.metadata.fromCache,
       });
     },
-    onError
+    onError,
   );
 }
